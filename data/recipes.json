@@ -1,0 +1,242 @@
+[
+  {
+    "id": 1,
+    "name": "Spaghetti Carbonara",
+    "cuisine": "Italian",
+    "description": "Classic Roman pasta with eggs, cheese, pancetta and black pepper.",
+    "ingredients": ["spaghetti", "eggs", "pecorino romano", "pancetta", "black pepper", "garlic"],
+    "instructions": "Cook spaghetti al dente. Fry pancetta until crispy. Mix eggs and cheese. Combine pasta with pancetta off heat, add egg mixture, toss vigorously. Season with black pepper.",
+    "tags": [],
+    "reviews": [
+      {"author": "Alice", "text": "Absolutely delicious! The pasta was perfectly creamy and the pancetta added great depth. Will make again!"},
+      {"author": "Bob", "text": "Loved this recipe, so rich and satisfying. The technique of adding egg off heat is key."},
+      {"author": "Carol", "text": "A bit too salty for my taste, but overall very good. The texture was perfect."},
+      {"author": "Dave", "text": "Classic and comforting. Followed the recipe exactly and it turned out wonderful."},
+      {"author": "Eve", "text": "Not the healthiest meal but incredibly tasty. Great for a special occasion."}
+    ]
+  },
+  {
+    "id": 2,
+    "name": "Vegan Buddha Bowl",
+    "cuisine": "American",
+    "description": "Nourishing bowl with quinoa, roasted vegetables, chickpeas and tahini dressing.",
+    "ingredients": ["quinoa", "chickpeas", "sweet potato", "kale", "avocado", "tahini", "lemon", "garlic", "olive oil", "cucumber", "cherry tomatoes"],
+    "instructions": "Cook quinoa. Roast sweet potato and chickpeas with olive oil and spices. Massage kale with lemon. Assemble bowls, drizzle with tahini dressing.",
+    "tags": ["vegan", "gluten-free"],
+    "reviews": [
+      {"author": "Fiona", "text": "So fresh and vibrant! Love all the colors and flavors. The tahini dressing is amazing."},
+      {"author": "George", "text": "Great healthy meal. Very filling and satisfying despite being plant-based."},
+      {"author": "Hannah", "text": "The roasted chickpeas are addictive! I make extra every time."},
+      {"author": "Ivan", "text": "Good but I wish there was more protein. Will add tofu next time."},
+      {"author": "Julia", "text": "Perfect meal prep recipe. Made a big batch for the whole week. Love how customizable it is."}
+    ]
+  },
+  {
+    "id": 3,
+    "name": "Keto Chicken Alfredo",
+    "cuisine": "Italian",
+    "description": "Low-carb version of chicken alfredo using zucchini noodles and rich cream sauce.",
+    "ingredients": ["chicken breast", "zucchini", "heavy cream", "parmesan", "butter", "garlic", "salt", "black pepper", "italian seasoning"],
+    "instructions": "Spiralize zucchini into noodles. Season and pan-fry chicken. Make alfredo sauce with butter, cream, and parmesan. Toss zucchini noodles and chicken in sauce.",
+    "tags": ["keto", "gluten-free"],
+    "reviews": [
+      {"author": "Kevin", "text": "Amazing keto alternative! Didn't miss the pasta at all. The sauce is so creamy."},
+      {"author": "Laura", "text": "Great low-carb comfort food. My whole family enjoyed it, even the non-keto ones."},
+      {"author": "Mike", "text": "The zucchini noodles release water, so make sure to salt them first. Recipe was delicious!"},
+      {"author": "Nancy", "text": "Rich and satisfying. Perfect for a keto lifestyle without sacrificing flavor."},
+      {"author": "Oscar", "text": "Quick to make on weeknights. I use a store-bought spiralizer which saves time."}
+    ]
+  },
+  {
+    "id": 4,
+    "name": "Avocado Toast with Poached Egg",
+    "cuisine": "American",
+    "description": "Trendy brunch staple with creamy avocado on sourdough and perfectly poached eggs.",
+    "ingredients": ["sourdough bread", "avocado", "eggs", "lemon", "red pepper flakes", "salt", "black pepper", "olive oil", "microgreens"],
+    "instructions": "Toast bread. Mash avocado with lemon, salt, and pepper. Poach eggs in vinegar water. Top toast with avocado and egg, garnish with red pepper flakes and microgreens.",
+    "tags": ["vegetarian"],
+    "reviews": [
+      {"author": "Penny", "text": "Simple and delicious. The poached egg makes it feel extra special."},
+      {"author": "Quinn", "text": "Classic brunch recipe. I add everything bagel seasoning for extra flavor."},
+      {"author": "Rachel", "text": "Perfect weekend breakfast. Easy to customize with different toppings."},
+      {"author": "Steve", "text": "Overrated in restaurants but amazing homemade. The avocado quality matters a lot."},
+      {"author": "Tina", "text": "My go-to breakfast. Quick, nutritious and absolutely delicious."}
+    ]
+  },
+  {
+    "id": 5,
+    "name": "Pad Thai",
+    "cuisine": "Thai",
+    "description": "Iconic Thai stir-fried noodles with shrimp, tofu, bean sprouts and peanuts.",
+    "ingredients": ["rice noodles", "shrimp", "tofu", "eggs", "bean sprouts", "green onions", "peanuts", "fish sauce", "tamarind paste", "lime", "garlic", "chili flakes"],
+    "instructions": "Soak rice noodles. Stir-fry garlic and shrimp. Add tofu and scramble eggs. Add noodles, tamarind-fish sauce mixture, and bean sprouts. Top with peanuts, lime and green onions.",
+    "tags": ["gluten-free"],
+    "reviews": [
+      {"author": "Uma", "text": "Authentic tasting! The tamarind makes all the difference. Better than restaurant takeout."},
+      {"author": "Victor", "text": "Great recipe but tamarind paste can be hard to find. Worth the effort!"},
+      {"author": "Wendy", "text": "My family devoured this. Perfectly balanced sweet, sour and savory flavors."},
+      {"author": "Xavier", "text": "Good foundation recipe. I add extra chili for more heat."},
+      {"author": "Yara", "text": "Love this dish. The peanuts and lime at the end really elevate everything."}
+    ]
+  },
+  {
+    "id": 6,
+    "name": "Greek Salad",
+    "cuisine": "Greek",
+    "description": "Fresh Mediterranean salad with tomatoes, cucumber, olives, feta and herbs.",
+    "ingredients": ["tomatoes", "cucumber", "kalamata olives", "feta cheese", "red onion", "bell pepper", "olive oil", "oregano", "red wine vinegar", "salt"],
+    "instructions": "Chop vegetables into large chunks. Combine in bowl. Add olives and feta. Dress with olive oil, red wine vinegar and dried oregano.",
+    "tags": ["vegetarian", "gluten-free"],
+    "reviews": [
+      {"author": "Zoe", "text": "So fresh and simple! The quality of ingredients really shines. Perfect summer salad."},
+      {"author": "Adam", "text": "Great side dish. The kalamata olives and feta are a must for authenticity."},
+      {"author": "Beth", "text": "Light and refreshing. I make this all summer long."},
+      {"author": "Chris", "text": "Classic and reliable. The oregano really makes this dish authentic."},
+      {"author": "Diana", "text": "Simple perfection. No dressing needed beyond olive oil and vinegar."}
+    ]
+  },
+  {
+    "id": 7,
+    "name": "Beef Tacos",
+    "cuisine": "Mexican",
+    "description": "Classic Mexican ground beef tacos with salsa, cheese and fresh toppings.",
+    "ingredients": ["ground beef", "corn tortillas", "onion", "garlic", "cumin", "chili powder", "tomatoes", "lettuce", "cheddar cheese", "sour cream", "lime", "cilantro"],
+    "instructions": "Brown ground beef with onion and garlic. Season with cumin and chili powder. Warm tortillas. Assemble tacos with meat and desired toppings.",
+    "tags": ["gluten-free"],
+    "reviews": [
+      {"author": "Ethan", "text": "Family favorite! We make taco night every week. Kids and adults love it."},
+      {"author": "Faye", "text": "Simple and delicious. I add jalapeños for some heat. Perfect weeknight meal."},
+      {"author": "Greg", "text": "Solid recipe. Using corn tortillas keeps it gluten-free. Tastes great."},
+      {"author": "Holly", "text": "Easy to customize for picky eaters. The seasoning blend is spot on."},
+      {"author": "Ian", "text": "Great tacos! I top mine with guacamole and pickled onions for extra flavor."}
+    ]
+  },
+  {
+    "id": 8,
+    "name": "Vegetable Coconut Curry",
+    "cuisine": "Indian",
+    "description": "Fragrant vegan curry with chickpeas, spinach and coconut milk over basmati rice.",
+    "ingredients": ["chickpeas", "spinach", "coconut milk", "tomatoes", "onion", "garlic", "ginger", "cumin", "coriander", "turmeric", "garam masala", "basmati rice", "coconut oil"],
+    "instructions": "Sauté onion, garlic and ginger. Add spices and bloom. Add tomatoes and coconut milk. Add chickpeas and simmer. Stir in spinach. Serve over basmati rice.",
+    "tags": ["vegan", "gluten-free"],
+    "reviews": [
+      {"author": "Jane", "text": "Incredibly fragrant and flavorful! The coconut milk makes it so creamy. Will definitely make again."},
+      {"author": "Karl", "text": "Great vegan comfort food. The spice blend is perfect - aromatic but not too hot."},
+      {"author": "Lisa", "text": "Made this for my vegan friend and everyone loved it. So hearty and satisfying."},
+      {"author": "Mark", "text": "Love how easy this is to make. I double the recipe and freeze portions."},
+      {"author": "Nina", "text": "Wonderful dish! The turmeric gives it such a beautiful golden color."}
+    ]
+  },
+  {
+    "id": 9,
+    "name": "Teriyaki Salmon",
+    "cuisine": "Japanese",
+    "description": "Pan-seared salmon glazed with sweet teriyaki sauce, served with steamed broccoli.",
+    "ingredients": ["salmon fillets", "soy sauce", "mirin", "sake", "brown sugar", "garlic", "ginger", "sesame oil", "broccoli", "sesame seeds", "green onions"],
+    "instructions": "Make teriyaki sauce with soy sauce, mirin, sake and brown sugar. Sear salmon skin-side down. Glaze with teriyaki and cook through. Steam broccoli. Garnish with sesame seeds.",
+    "tags": ["gluten-free", "keto"],
+    "reviews": [
+      {"author": "Omar", "text": "Restaurant-quality at home! The teriyaki glaze is incredible. So easy to make."},
+      {"author": "Paula", "text": "Perfect weeknight dinner. Quick, healthy and absolutely delicious."},
+      {"author": "Rob", "text": "The sauce is perfect - just the right balance of sweet and savory."},
+      {"author": "Sara", "text": "This has become my go-to salmon recipe. The kids love the sweet glaze."},
+      {"author": "Tom", "text": "Great keto-friendly option. Nutritious and packed with flavor."}
+    ]
+  },
+  {
+    "id": 10,
+    "name": "Falafel Wrap",
+    "cuisine": "Middle Eastern",
+    "description": "Crispy chickpea falafel in a warm pita with hummus, vegetables and tahini sauce.",
+    "ingredients": ["chickpeas", "parsley", "cilantro", "garlic", "cumin", "coriander", "onion", "pita bread", "hummus", "tomatoes", "lettuce", "cucumber", "tahini", "lemon"],
+    "instructions": "Blend soaked chickpeas with herbs and spices. Form into balls and fry until golden. Warm pita. Assemble wrap with falafel, hummus, vegetables and tahini drizzle.",
+    "tags": ["vegan"],
+    "reviews": [
+      {"author": "Ursula", "text": "Best falafel I've ever made! Crispy outside, tender inside. The herb mix is perfect."},
+      {"author": "Val", "text": "Delicious and filling vegan option. The tahini sauce ties everything together."},
+      {"author": "Will", "text": "Labor intensive but worth every minute. Great for meal prep - freeze the falafel balls."},
+      {"author": "Xena", "text": "Fantastic flavors! I bake instead of fry for a healthier version."},
+      {"author": "Yasmin", "text": "Authentic tasting! Brings back memories of street food in Tel Aviv."}
+    ]
+  },
+  {
+    "id": 11,
+    "name": "Mushroom Risotto",
+    "cuisine": "Italian",
+    "description": "Creamy Arborio rice slow-cooked with wild mushrooms, white wine and parmesan.",
+    "ingredients": ["arborio rice", "mixed mushrooms", "white wine", "parmesan", "butter", "onion", "garlic", "vegetable broth", "olive oil", "thyme", "parsley"],
+    "instructions": "Sauté shallots and mushrooms. Toast rice. Deglaze with white wine. Add warm broth ladle by ladle, stirring constantly. Finish with butter and parmesan.",
+    "tags": ["vegetarian", "gluten-free"],
+    "reviews": [
+      {"author": "Zack", "text": "Perfectly creamy! The technique of adding broth slowly really does make a difference."},
+      {"author": "Amy", "text": "Love this recipe. Wild mushrooms add so much depth and earthiness."},
+      {"author": "Ben", "text": "Requires patience but the result is restaurant-worthy. The parmesan finish is key."},
+      {"author": "Clara", "text": "My comfort food. I use porcini mushrooms for the most intense flavor."},
+      {"author": "Dan", "text": "Excellent recipe. Takes about 30 minutes of stirring but is absolutely worth it."}
+    ]
+  },
+  {
+    "id": 12,
+    "name": "Cauliflower Fried Rice",
+    "cuisine": "Chinese",
+    "description": "Low-carb keto take on fried rice using riced cauliflower with eggs and vegetables.",
+    "ingredients": ["cauliflower", "eggs", "carrots", "peas", "green onions", "soy sauce", "sesame oil", "garlic", "ginger", "vegetable oil"],
+    "instructions": "Rice cauliflower in food processor. Stir-fry garlic and ginger. Add vegetables. Push aside and scramble eggs. Add cauliflower rice and soy sauce. Toss and garnish with green onions.",
+    "tags": ["keto", "gluten-free", "vegan"],
+    "reviews": [
+      {"author": "Emma", "text": "Surprisingly satisfying! Couldn't believe how much it tastes like real fried rice."},
+      {"author": "Frank", "text": "Great keto recipe. I add chicken and shrimp to make it a complete meal."},
+      {"author": "Grace", "text": "Love this lighter alternative. The sesame oil really adds authenticity."},
+      {"author": "Henry", "text": "My kids actually prefer this over regular fried rice now!"},
+      {"author": "Isla", "text": "Quick and healthy weeknight dinner. I meal prep the cauliflower rice ahead."}
+    ]
+  },
+  {
+    "id": 13,
+    "name": "Red Lentil Soup",
+    "cuisine": "Mediterranean",
+    "description": "Hearty vegan soup with red lentils, cumin, lemon and fresh herbs.",
+    "ingredients": ["red lentils", "onion", "garlic", "carrot", "celery", "cumin", "coriander", "paprika", "vegetable broth", "lemon", "olive oil", "parsley", "tomatoes"],
+    "instructions": "Sauté onion, garlic, carrot and celery. Add spices. Add lentils and broth. Simmer until lentils are soft. Blend partially. Finish with lemon juice and fresh parsley.",
+    "tags": ["vegan", "gluten-free"],
+    "reviews": [
+      {"author": "Jake", "text": "So warming and nourishing! The cumin and lemon combination is wonderful."},
+      {"author": "Kate", "text": "Perfect winter soup. Cheap, nutritious and incredibly delicious."},
+      {"author": "Leo", "text": "Better the next day! I always make a big pot on Sundays."},
+      {"author": "Mia", "text": "Extremely comforting. The texture from partial blending is perfect."},
+      {"author": "Noah", "text": "One of my favorite soups. Simple ingredients create something magical."}
+    ]
+  },
+  {
+    "id": 14,
+    "name": "Chicken Shawarma",
+    "cuisine": "Middle Eastern",
+    "description": "Spiced marinated chicken cooked until tender, wrapped in flatbread with garlic sauce.",
+    "ingredients": ["chicken thighs", "yogurt", "cumin", "coriander", "turmeric", "paprika", "cinnamon", "garlic", "lemon", "olive oil", "flatbread", "tomatoes", "lettuce", "garlic sauce"],
+    "instructions": "Marinate chicken with yogurt and spices overnight. Roast or grill until cooked through. Slice and serve in warm flatbread with garlic sauce and vegetables.",
+    "tags": [],
+    "reviews": [
+      {"author": "Olivia", "text": "The marinade is everything! So fragrant and flavorful. Tastes just like the real thing."},
+      {"author": "Peter", "text": "Incredible flavors. I marinade for 24 hours for maximum taste."},
+      {"author": "Quinn", "text": "Family loved this! The garlic sauce is essential - don't skip it."},
+      {"author": "Rosa", "text": "Authentic and delicious. The spice blend is complex but balanced."},
+      {"author": "Sam", "text": "Great recipe! I use the leftovers for salads and rice bowls throughout the week."}
+    ]
+  },
+  {
+    "id": 15,
+    "name": "Zucchini Noodles with Basil Pesto",
+    "cuisine": "Italian",
+    "description": "Light and fresh zucchini noodles tossed with vibrant homemade basil pesto.",
+    "ingredients": ["zucchini", "fresh basil", "pine nuts", "parmesan", "garlic", "olive oil", "lemon", "salt", "cherry tomatoes"],
+    "instructions": "Spiralize zucchini. Make pesto by blending basil, pine nuts, parmesan, garlic and olive oil. Toss zucchini noodles with pesto. Add cherry tomatoes. Serve immediately.",
+    "tags": ["vegetarian", "keto", "gluten-free"],
+    "reviews": [
+      {"author": "Tara", "text": "Light, fresh and delicious! The homemade pesto is so vibrant and flavorful."},
+      {"author": "Ugo", "text": "Perfect summer dish. The zucchini noodles don't feel like a compromise at all."},
+      {"author": "Vera", "text": "Love this healthy take on pasta. The pesto recipe alone is worth saving."},
+      {"author": "Wade", "text": "So quick to make! Ready in 15 minutes. Great keto option."},
+      {"author": "Xia", "text": "Refreshing and satisfying. I add grilled chicken for extra protein."}
+    ]
+  }
+]

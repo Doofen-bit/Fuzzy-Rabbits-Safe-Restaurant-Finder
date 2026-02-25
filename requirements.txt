@@ -1,0 +1,6 @@
+streamlit>=1.32.0
+scikit-learn>=1.4.0
+numpy>=1.26.0
+SpeechRecognition>=3.10.0
+textblob>=0.18.0
+pytest>=8.0.0

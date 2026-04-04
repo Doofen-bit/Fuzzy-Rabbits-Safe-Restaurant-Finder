@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python:*)",
+      "WebFetch(domain:data.cityofnewyork.us)",
+      "Bash(pip install:*)"
+    ]
+  }
+}

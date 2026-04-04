@@ -1,6 +1,122 @@
-# Fuzzy-Rabbits
-ML Project for 
-- Lisa Popova (yp2541@nyu.edu)  - Wendy Liu (jl14704@nyu.edu)  - Yixuan Du (yd2927@nyu.edu)  - George Liu (jl15266@nyu.edu)  - Yuxi Wu (yw8271@nyu.edu)
+# Fuzzy-Rabbits — Safe Restaurant Recommendation System
+ML Project for
+- Lisa Popova (yp2541@nyu.edu) - Wendy Liu (jl14704@nyu.edu) - Yixuan Du (yd2927@nyu.edu) - George Liu (jl15266@nyu.edu) - Yuxi Wu (yw8271@nyu.edu)
+
+---
+
+## Data Setup and Preprocessing (read this first)
+
+### Step 1 — Download the raw data
+
+The raw dataset is **not stored in git** (it is ~150 MB). Each team member must download it manually once:
+
+1. Go to: https://data.cityofnewyork.us/Health/DOHMH-New-York-City-Restaurant-Inspection-Results/43nn-pn8j/about_data
+2. Click **Export → CSV** to download the file.
+3. Rename the downloaded file to match the exact filename expected by the pipeline:
+   ```
+   DOHMH_New_York_City_Restaurant_Inspection_Results_20260403.csv
+   ```
+4. Place it inside the `data/` folder of this repo:
+   ```
+   safe-restaurant-finder/
+   └── data/
+       └── DOHMH_New_York_City_Restaurant_Inspection_Results_20260403.csv
+   ```
+
+The `data/` folder is listed in `.gitignore` — CSV files there will never be accidentally committed.
+
+---
+
+### Step 2 — Install dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+---
+
+### Step 3 — Run the preprocessing pipeline
+
+From the **project root**, run:
+
+```bash
+python -m src.preprocessor
+```
+
+This reads the raw CSV and writes `data/restaurants.csv` — a clean table with **one row per unique restaurant**. It takes about 30–60 seconds on the full dataset.
+
+You can also specify custom input/output paths:
+
+```bash
+python -m src.preprocessor path/to/raw.csv path/to/output.csv
+```
+
+---
+
+### What `data/restaurants.csv` contains
+
+Each row is one unique restaurant (identified by `camis`). Columns:
+
+| Column | Description |
+|---|---|
+| `camis` | Unique restaurant ID (use this as the join key) |
+| `dba` | Restaurant name |
+| `boro`, `building`, `street`, `zipcode` | Address |
+| `cuisine` | Cuisine type |
+| `latitude`, `longitude` | Coordinates for map/distance features |
+| `nta`, `community_board`, `council_district` | Geographic subdivisions |
+| `latest_grade` | Most recent letter grade: A, B, or C |
+| `latest_grade_encoded` | Numeric: A=3, B=2, C=1 (use as KNN target label) |
+| `latest_grade_date` | Date the current grade was issued |
+| `latest_score` | Score from the most recent inspection (lower = better) |
+| `latest_inspection_date` | Date of the most recent inspection |
+| `latest_action` | Action taken at the most recent inspection |
+| `inspection_count` | Number of unique inspections on record |
+| `mean_score` | Mean score across all inspections |
+| `min_score` / `max_score` | Score range across all inspections |
+| `days_since_last_inspection` | Days between last inspection and script run date |
+| `total_violations` | Total violation records across all inspections |
+| `critical_violations` | Count of critical-flag violations |
+| `non_critical_violations` | Count of non-critical violations |
+| `unique_violation_codes` | Comma-separated list of all violation codes ever cited |
+
+---
+
+### How to load `restaurants.csv` in your code
+
+```python
+import pandas as pd
+
+restaurants = pd.read_csv("data/restaurants.csv", parse_dates=["latest_grade_date", "latest_inspection_date"])
+```
+
+**For the KNN classifier** (George & Lisa) — the feature matrix and target label are ready to use:
+
+```python
+features = restaurants[["mean_score", "latest_score", "critical_violations",
+                         "total_violations", "days_since_last_inspection",
+                         "inspection_count"]].dropna()
+labels = restaurants.loc[features.index, "latest_grade_encoded"]
+```
+
+**For the text retrieval / SentenceTransformer** (Wendy) — build a description string per restaurant:
+
+```python
+restaurants["text"] = (
+    restaurants["cuisine"].fillna("") + " restaurant in " +
+    restaurants["boro"].fillna("") + ", " +
+    restaurants["street"].fillna("")
+)
+```
+
+**For the Streamlit map** (Yuxi) — latitude and longitude are numeric and ready:
+
+```python
+map_data = restaurants[["dba", "latitude", "longitude", "latest_grade"]].dropna()
+```
+
+---
+
 Here's a complete guide for your group to get started with GitHub collaboration and Claude Code.
 
 ---

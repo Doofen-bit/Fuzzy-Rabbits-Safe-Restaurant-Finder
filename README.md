@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Fuzzy-Rabbits — Safe Restaurant Recommendation System
 ML Project for
 - Lisa Popova (yp2541@nyu.edu) - Wendy Liu (jl14704@nyu.edu) - Yixuan Du (yd2927@nyu.edu) - George Liu (jl15266@nyu.edu) - Yuxi Wu (yw8271@nyu.edu)
@@ -117,6 +118,11 @@ map_data = restaurants[["dba", "latitude", "longitude", "latest_grade"]].dropna(
 
 ---
 
+=======
+# Fuzzy-Rabbits
+ML Project for 
+- Lisa Popova (yp2541@nyu.edu)  - Wendy Liu (jl14704@nyu.edu)  - Yixuan Du (yd2927@nyu.edu)  - George Liu (jl15266@nyu.edu)  - Yuxi Wu (yw8271@nyu.edu)
+>>>>>>> 6ddf6058c6d6644e6e7d04320ac821bab0854a4c
 Here's a complete guide for your group to get started with GitHub collaboration and Claude Code.
 
 ---

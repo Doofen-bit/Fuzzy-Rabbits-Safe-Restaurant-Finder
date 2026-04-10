@@ -1,7 +1,11 @@
-<<<<<<< HEAD
 # Fuzzy-Rabbits — Safe Restaurant Recommendation System
-ML Project for
-- Lisa Popova (yp2541@nyu.edu) - Wendy Liu (jl14704@nyu.edu) - Yixuan Du (yd2927@nyu.edu) - George Liu (jl15266@nyu.edu) - Yuxi Wu (yw8271@nyu.edu)
+
+ML Project for  
+- Lisa Popova (yp2541@nyu.edu)
+- Wendy Liu (jl14704@nyu.edu)
+- Yixuan Du (yd2927@nyu.edu)
+- George Liu (jl15266@nyu.edu)
+- Yuxi Wu (yw8271@nyu.edu)
 
 ---
 
@@ -19,7 +23,7 @@ The raw dataset is **not stored in git** (it is ~150 MB). Each team member must 
    ```
 4. Place it inside the `data/` folder of this repo:
    ```
-   safe-restaurant-finder/
+   Fuzzy-Rabbits-Safe-Restaurant-Finder/
    └── data/
        └── DOHMH_New_York_City_Restaurant_Inspection_Results_20260403.csv
    ```
@@ -118,111 +122,109 @@ map_data = restaurants[["dba", "latitude", "longitude", "latest_grade"]].dropna(
 
 ---
 
-=======
-# Fuzzy-Rabbits
-ML Project for 
-- Lisa Popova (yp2541@nyu.edu)  - Wendy Liu (jl14704@nyu.edu)  - Yixuan Du (yd2927@nyu.edu)  - George Liu (jl15266@nyu.edu)  - Yuxi Wu (yw8271@nyu.edu)
->>>>>>> 6ddf6058c6d6644e6e7d04320ac821bab0854a4c
-Here's a complete guide for your group to get started with GitHub collaboration and Claude Code.
+## Running the Streamlit Dashboard
+
+`streamlit_app.py` visualises the full conversion pipeline and lets you explore all 30,935 restaurants on an interactive NYC map. You must complete **Data Setup Steps 1–3** above before running it.
+
+### Windows (native Python)
+
+The `streamlit` command may not be on your PATH after installation. Use the module flag instead — this always works:
+
+```
+python -m streamlit run streamlit_app.py
+```
+
+Your browser will open `http://localhost:8501` automatically.
+
+> **If you see `'streamlit' is not recognized`**, that means the Scripts folder is not on PATH. The `python -m streamlit` form above bypasses this entirely, so use that.
 
 ---
 
-## Setting Up Your GitHub Collaborative Project from Scratch
+### WSL (Windows Subsystem for Linux)
 
-### Step 1: One Person Creates the Repository (Team Lead)
-
-One person does this:
-
-1. Go to [github.com](https://github.com) and sign in
-2. Click the **+** icon → **New repository**
-3. Fill in:
-   - Repository name: `safe-restaurant-finder` (or similar)
-   - Description: "KNN-based NYC restaurant safety recommendation system"
-   - Set to **Public** or **Private**
-   - ✅ Check "Add a README file"
-   - ✅ Add `.gitignore` → choose **Python**
-4. Click **Create repository**
-
----
-
-### Step 2: Add All Team Members as Collaborators
-
-The repo creator goes to:
-**Settings → Collaborators → Add people** → type each teammate's GitHub username
-
-Each teammate will get an email invite — everyone must **accept** before they can push code.
-
----
-
-### Step 3: Everyone Clones the Repository
-
-Each team member runs this on their own computer:
+WSL has a separate Python environment from Windows. Install the dependencies inside WSL first:
 
 ```bash
-git clone https://github.com/<team-lead-username>/safe-restaurant-finder.git
-cd safe-restaurant-finder
+# 1. Install pip if it is not already present
+sudo apt-get update && sudo apt-get install -y python3-pip python3-venv
+
+# 2. Navigate to the project (adjust the path if your username differs)
+cd /mnt/c/Users/<your-username>/Fuzzy-Rabbits-Safe-Restaurant-Finder
+
+# 3. Install Python dependencies
+pip3 install -r requirements.txt
+
+# 4. Run the app
+python3 -m streamlit run streamlit_app.py
+```
+
+WSL cannot open a browser automatically. After the terminal shows `Network URL: http://localhost:8501`, open that address in your **Windows** browser.
+
+> **Do not run** `python3 pip install …` — that tries to run pip as a script file.  
+> The correct form is `pip3 install …` or `python3 -m pip install …`.
+
+---
+
+### macOS / Linux
+
+```bash
+pip3 install -r requirements.txt
+python3 -m streamlit run streamlit_app.py
 ```
 
 ---
 
-### Step 4: Set Up the Project Structure (Team Lead Does This Once)
+### What the dashboard shows
 
-The team lead creates the initial folder structure and pushes it:
+| Tab | Contents |
+|---|---|
+| **Conversion Pipeline** | Step-by-step view of how raw DOHMH violation records become `restaurants.csv`, with metrics, transformation tables, and charts at each step. Toggle "Load raw data" to inspect the source CSV live. |
+| **Data Explorer** | Filterable table of all restaurants. Use the sidebar to narrow by borough, grade, cuisine, and score range. |
+| **NYC Map** | Interactive scatter map of ~30,500 restaurants coloured by grade (green = A, yellow = B, red = C). Switch to a heatmap view weighted by critical violations. Click any dot for name, address, grade, and score. |
+
+---
+
+## Project Structure
 
 ```
-safe-restaurant-finder/
-│
-├── data/                  # Raw and processed data files
-│   └── .gitkeep
-├── notebooks/             # Jupyter notebooks for exploration
-│   └── .gitkeep
-├── src/                   # Core Python source code
+Fuzzy-Rabbits-Safe-Restaurant-Finder/
+├── data/
+│   ├── .gitkeep
+│   ├── DOHMH_New_York_City_Restaurant_Inspection_Results_20260403.csv   # download manually
+│   └── restaurants.csv                                                  # generated by preprocessor
+├── src/
 │   ├── __init__.py
-│   ├── data_loader.py     # Yixuan's area
-│   ├── preprocessor.py    # Yixuan's area
-│   ├── knn_model.py       # George & Lisa's area
-│   └── recommender.py     # George & Lisa's area
-├── app.py                 # Streamlit app — Yuxi's area
-├── requirements.txt       # Python dependencies
-├── .gitignore
+│   ├── data_loader.py       # loads and cleans raw CSV
+│   └── preprocessor.py      # aggregates to restaurant level
+├── streamlit_app.py         # interactive dashboard
+├── requirements.txt
 └── README.md
 ```
 
-Create a `requirements.txt` right away:
-
-```
-streamlit
-pandas
-numpy
-requests
-plotly
-```
-
-Push this structure:
-
-```bash
-git add .
-git commit -m "Initial project structure"
-git push origin main
-```
-
 ---
 
-### Step 5: Everyone Works on Their Own Branch — The Golden Rule
-
-**Never commit directly to `main`.** Each person works on a feature branch:
+## Daily Git Workflow
 
 ```bash
-# Pull the latest main first
+# Before starting — sync with main
 git pull origin main
 
-# Create and switch to your own branch
-git checkout -b yixuan/data-preprocessing
+# Create your branch (do this once)
+git checkout -b <your-name>/<feature>
+
+# Stage and commit your work
+git add src/my_file.py
+git commit -m "Short description of what you did"
+
+# Push to GitHub
+git push origin <your-name>/<feature>
 ```
 
-Branch naming convention for your team:
+Then open a Pull Request on GitHub. Get one teammate to review it before merging.
 
-| Person | Branch Name |
+**Branch naming convention:**
+
+| Person | Branch |
 |---|---|
 | Yixuan | `yixuan/data-preprocessing` |
 | George | `george/knn-model` |
@@ -230,173 +232,19 @@ Branch naming convention for your team:
 | Yuxi | `yuxi/streamlit-ui` |
 | Wendy | `wendy/documentation` |
 
----
-
-### Step 6: Daily Workflow — What Each Person Does Every Day
-
-```bash
-# 1. Before starting work, always sync with main
-git pull origin main
-
-# 2. Do your work, then stage your changes
-git add src/data_loader.py      # add specific files
-# or
-git add .                       # add everything
-
-# 3. Commit with a clear message
-git commit -m "Add data loading function for NYC Open Data API"
-
-# 4. Push your branch to GitHub
-git push origin yixuan/data-preprocessing
-```
+**Never commit directly to `main`.**
 
 ---
 
-### Step 7: Merging Work — Pull Requests
-
-When a piece of work is ready to be shared with the team:
-
-1. Go to the repo on GitHub
-2. You'll see a banner: **"Compare & pull request"** — click it
-3. Write a short description of what you did
-4. Assign a teammate to **review** it
-5. Once approved, click **Merge pull request**
-6. Everyone then runs `git pull origin main` to get the update
-
-**Tip:** Do small, frequent pull requests rather than one giant one at the end. It prevents painful merge conflicts.
-
----
-
-### Step 8: Handling Merge Conflicts
-
-If two people edited the same file, Git will flag a conflict. The file will look like this:
-
-```
-<<<<<<< HEAD
-your version of the code
-=======
-teammate's version of the code
->>>>>>> george/knn-model
-```
-
-You manually edit the file to keep the right version, then:
+## Quick Reference
 
 ```bash
-git add <conflicted-file>
-git commit -m "Resolve merge conflict in knn_model.py"
+git pull origin main              # sync with latest
+git checkout -b <branch-name>     # create new branch
+git add .                         # stage all changes
+git commit -m "message"           # commit
+git push origin <branch-name>     # push to GitHub
+git status                        # see what changed
+git log --oneline                 # see commit history
+git diff                          # see uncommitted changes
 ```
-
-**Best way to avoid conflicts:** communicate in your group chat before editing shared files like `app.py`.
-
----
-
-### Running the Streamlit App Locally
-
-Anyone can run the app at any time with:
-
-```bash
-streamlit run app.py
-```
-
-It opens automatically in your browser at `http://localhost:8501`.
-
----
-
-## How to Use Claude Code for Help
-
-Claude Code is a command-line tool that gives you an AI coding assistant directly in your terminal, with full access to your project files.
-
-### Installing Claude Code
-
-```bash
-npm install -g @anthropic-ai/claude-code
-```
-
-You need Node.js 18+ installed. Then authenticate:
-
-```bash
-claude
-```
-
-It will prompt you to log in with your Anthropic account the first time.
-
-### Starting a Session in Your Project
-
-```bash
-cd safe-restaurant-finder
-claude
-```
-
-Claude Code can now see all your files. You talk to it in plain English.
-
-### What You Can Ask Claude Code to Do
-
-Since you're responsible for the **data section**, here are example prompts tailored to your work:
-
-```
-Write a function in src/data_loader.py that fetches restaurant 
-inspection data from the NYC Open Data API for a given zip code.
-```
-
-```
-Look at src/preprocessor.py and add a function that groups records 
-by CAMIS, computes total violations, critical violation count, and 
-days since last inspection.
-```
-
-```
-The data has missing GRADE values. Update the preprocessor to encode 
-grades as A=3, B=2, C=1, ungraded=0.
-```
-
-```
-Add min-max normalization to the feature vectors in preprocessor.py.
-```
-
-```
-Run the data loader and show me what the first 5 rows look like after 
-preprocessing.
-```
-
-### Key Things to Know About Claude Code
-
-- It reads and edits your **actual files** — always be on a branch (not `main`) when working with it so you can review changes before merging
-- You can say **"show me what you changed"** and it will diff the edits
-- If it makes a mistake, say **"undo that"** or just use `git diff` and `git checkout` to revert
-- You can paste in error messages directly and ask it to fix them
-- It works best with specific, concrete requests rather than vague ones
-
-### Suggested Workflow with Claude Code
-
-```bash
-# 1. Make sure you're on your branch
-git checkout yixuan/data-preprocessing
-
-# 2. Open Claude Code
-claude
-
-# 3. Ask it to help you write or fix code
-
-# 4. Review the changes it made
-git diff
-
-# 5. If happy, commit
-git commit -m "Add preprocessing pipeline with feature engineering"
-```
-
----
-
-## Quick Reference Cheat Sheet
-
-```bash
-git pull origin main              # Sync with latest
-git checkout -b <branch-name>     # Create new branch
-git add .                         # Stage all changes
-git commit -m "message"           # Commit
-git push origin <branch-name>     # Push to GitHub
-git status                        # See what's changed
-git log --oneline                 # See commit history
-git diff                          # See uncommitted changes
-```
-
-The most important habits for a 5-person team: **always branch, pull before you start, commit often, and communicate before touching shared files.** Good luck with the project!

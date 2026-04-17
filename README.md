@@ -1,6 +1,6 @@
-# Fuzzy-Rabbits — Safe Restaurant Recommendation System
+# Fuzzy-Rabbits — NYC Safe Restaurant Finder
 
-ML Project for  
+ML Project — NYU  
 - Lisa Popova (yp2541@nyu.edu)
 - Wendy Liu (jl14704@nyu.edu)
 - Yixuan Du (yd2927@nyu.edu)
@@ -9,28 +9,62 @@ ML Project for
 
 ---
 
-## Data Setup and Preprocessing (read this first)
+## Overview
 
-### Step 1 — Download the raw data
+An end-to-end machine-learning dashboard built on **295,995 DOHMH restaurant inspection records** from NYC Open Data. The project is structured as five sequential parts, each adding a new ML capability on top of the shared `restaurants.csv` dataset.
 
-The raw dataset is **not stored in git** (it is ~150 MB). Each team member must download it manually once:
+| Part | Tab | What it does |
+|---|---|---|
+| **1** | Data & Exploration | Three-step preprocessing pipeline · filterable data explorer · interactive NYC map |
+| **2** | KNN Classifier | From-scratch K-Nearest Neighbors predicts restaurant grade (A/B/C) from inspection history |
+| **3** | Decision Tree Classifier | From-scratch weighted-Gini Decision Tree — fixes every class-imbalance problem in Part 2 |
+| **4** | Cuisine Predictor | scikit-learn TF-IDF + Logistic Regression predicts cuisine type from restaurant name alone |
+| **5** | Safe Restaurant Route | Reinforcement Learning (Value Iteration) plans a walking route to the nearest safe, cuisine-matching restaurant cluster — shown on a real OpenStreetMap |
+
+---
+
+## Quick Start
+
+```bash
+# 1. Clone the repo
+git clone <repo-url>
+cd Fuzzy-Rabbits-Safe-Restaurant-Finder
+
+# 2. Install dependencies
+pip install -r requirements.txt
+
+# 3. Download the raw data (see below — one-time)
+# 4. Build restaurants.csv
+python -m src.preprocessor
+
+# 5. Launch the dashboard
+python -m streamlit run streamlit_app.py
+```
+
+Your browser opens `http://localhost:8501` automatically.
+
+---
+
+## Data Setup
+
+### Step 1 — Download the raw DOHMH data
+
+The raw dataset is **not in git** (~150 MB). Each team member downloads it once:
 
 1. Go to: https://data.cityofnewyork.us/Health/DOHMH-New-York-City-Restaurant-Inspection-Results/43nn-pn8j/about_data
-2. Click **Export → CSV** to download the file.
-3. Rename the downloaded file to match the exact filename expected by the pipeline:
+2. Click **Export → CSV**.
+3. Rename the file to exactly:
    ```
    DOHMH_New_York_City_Restaurant_Inspection_Results_20260403.csv
    ```
-4. Place it inside the `data/` folder of this repo:
+4. Place it in `data/`:
    ```
    Fuzzy-Rabbits-Safe-Restaurant-Finder/
    └── data/
        └── DOHMH_New_York_City_Restaurant_Inspection_Results_20260403.csv
    ```
 
-The `data/` folder is listed in `.gitignore` — CSV files there will never be accidentally committed.
-
----
+The `data/` folder is in `.gitignore` — CSV files there will never be committed.
 
 ### Step 2 — Install dependencies
 
@@ -38,19 +72,25 @@ The `data/` folder is listed in `.gitignore` — CSV files there will never be a
 pip install -r requirements.txt
 ```
 
----
+All required packages:
 
-### Step 3 — Run the preprocessing pipeline
+| Package | Used in |
+|---|---|
+| `pandas`, `numpy` | All parts |
+| `streamlit` | Dashboard |
+| `plotly`, `pydeck` | Parts 1–3 charts and maps |
+| `scikit-learn` | Parts 4 & 5 (TF-IDF, Logistic Regression) |
+| `scipy` | Part 5 (Gaussian blur on reward grid) |
+| `folium`, `streamlit-folium` | Part 5 (interactive OpenStreetMap) |
+| `requests` | Part 5 (OSRM street-routing API) |
 
-From the **project root**, run:
+### Step 3 — Build restaurants.csv
 
 ```bash
 python -m src.preprocessor
 ```
 
-This reads the raw CSV and writes `data/restaurants.csv` — a clean table with **one row per unique restaurant**. It takes about 30–60 seconds on the full dataset.
-
-You can also specify custom input/output paths:
+Reads the raw CSV and writes `data/restaurants.csv` — one row per unique restaurant. Takes ~30–60 seconds on the full dataset. Custom paths:
 
 ```bash
 python -m src.preprocessor path/to/raw.csv path/to/output.csv
@@ -58,112 +98,26 @@ python -m src.preprocessor path/to/raw.csv path/to/output.csv
 
 ---
 
-### What `data/restaurants.csv` contains
+## Running the Dashboard
 
-Each row is one unique restaurant (identified by `camis`). Columns:
-
-| Column | Description |
-|---|---|
-| `camis` | Unique restaurant ID (use this as the join key) |
-| `dba` | Restaurant name |
-| `boro`, `building`, `street`, `zipcode` | Address |
-| `cuisine` | Cuisine type |
-| `latitude`, `longitude` | Coordinates for map/distance features |
-| `nta`, `community_board`, `council_district` | Geographic subdivisions |
-| `latest_grade` | Most recent letter grade: A, B, or C |
-| `latest_grade_encoded` | Numeric: A=3, B=2, C=1 (use as KNN target label) |
-| `latest_grade_date` | Date the current grade was issued |
-| `latest_score` | Score from the most recent inspection (lower = better) |
-| `latest_inspection_date` | Date of the most recent inspection |
-| `latest_action` | Action taken at the most recent inspection |
-| `inspection_count` | Number of unique inspections on record |
-| `mean_score` | Mean score across all inspections |
-| `min_score` / `max_score` | Score range across all inspections |
-| `days_since_last_inspection` | Days between last inspection and script run date |
-| `total_violations` | Total violation records across all inspections |
-| `critical_violations` | Count of critical-flag violations |
-| `non_critical_violations` | Count of non-critical violations |
-| `unique_violation_codes` | Comma-separated list of all violation codes ever cited |
-
----
-
-### How to load `restaurants.csv` in your code
-
-```python
-import pandas as pd
-
-restaurants = pd.read_csv("data/restaurants.csv", parse_dates=["latest_grade_date", "latest_inspection_date"])
-```
-
-**For the KNN classifier** (George & Lisa) — the feature matrix and target label are ready to use:
-
-```python
-features = restaurants[["mean_score", "latest_score", "critical_violations",
-                         "total_violations", "days_since_last_inspection",
-                         "inspection_count"]].dropna()
-labels = restaurants.loc[features.index, "latest_grade_encoded"]
-```
-
-**For the text retrieval / SentenceTransformer** (Wendy) — build a description string per restaurant:
-
-```python
-restaurants["text"] = (
-    restaurants["cuisine"].fillna("") + " restaurant in " +
-    restaurants["boro"].fillna("") + ", " +
-    restaurants["street"].fillna("")
-)
-```
-
-**For the Streamlit map** (Yuxi) — latitude and longitude are numeric and ready:
-
-```python
-map_data = restaurants[["dba", "latitude", "longitude", "latest_grade"]].dropna()
-```
-
----
-
-## Running the Streamlit Dashboard
-
-`streamlit_app.py` visualises the full conversion pipeline and lets you explore all 30,935 restaurants on an interactive NYC map. You must complete **Data Setup Steps 1–3** above before running it.
-
-### Windows (native Python)
-
-The `streamlit` command may not be on your PATH after installation. Use the module flag instead — this always works:
+### Windows
 
 ```
 python -m streamlit run streamlit_app.py
 ```
 
-Your browser will open `http://localhost:8501` automatically.
-
-> **If you see `'streamlit' is not recognized`**, that means the Scripts folder is not on PATH. The `python -m streamlit` form above bypasses this entirely, so use that.
-
----
+> If `streamlit` is not on PATH, the `python -m streamlit` form above always works.
 
 ### WSL (Windows Subsystem for Linux)
 
-WSL has a separate Python environment from Windows. Install the dependencies inside WSL first:
-
 ```bash
-# 1. Install pip if it is not already present
-sudo apt-get update && sudo apt-get install -y python3-pip python3-venv
-
-# 2. Navigate to the project (adjust the path if your username differs)
+sudo apt-get update && sudo apt-get install -y python3-pip
 cd /mnt/c/Users/<your-username>/Fuzzy-Rabbits-Safe-Restaurant-Finder
-
-# 3. Install Python dependencies
 pip3 install -r requirements.txt
-
-# 4. Run the app
 python3 -m streamlit run streamlit_app.py
 ```
 
-WSL cannot open a browser automatically. After the terminal shows `Network URL: http://localhost:8501`, open that address in your **Windows** browser.
-
-> **Do not run** `python3 pip install …` — that tries to run pip as a script file.  
-> The correct form is `pip3 install …` or `python3 -m pip install …`.
-
----
+Open `http://localhost:8501` in your Windows browser after the terminal shows the Network URL.
 
 ### macOS / Linux
 
@@ -174,13 +128,99 @@ python3 -m streamlit run streamlit_app.py
 
 ---
 
-### What the dashboard shows
+## Dataset — `restaurants.csv`
 
-| Tab | Contents |
+One row per unique restaurant (identified by `camis`). Key columns:
+
+| Column | Description |
 |---|---|
-| **Conversion Pipeline** | Step-by-step view of how raw DOHMH violation records become `restaurants.csv`, with metrics, transformation tables, and charts at each step. Toggle "Load raw data" to inspect the source CSV live. |
-| **Data Explorer** | Filterable table of all restaurants. Use the sidebar to narrow by borough, grade, cuisine, and score range. |
-| **NYC Map** | Interactive scatter map of ~30,500 restaurants coloured by grade (green = A, yellow = B, red = C). Switch to a heatmap view weighted by critical violations. Click any dot for name, address, grade, and score. |
+| `camis` | Unique restaurant ID |
+| `dba` | Restaurant name |
+| `boro`, `building`, `street`, `zipcode` | Address |
+| `cuisine` | Cuisine type (95 categories) |
+| `latitude`, `longitude` | Coordinates |
+| `latest_grade` | Most recent letter grade: A, B, or C |
+| `latest_grade_encoded` | Numeric: A=3, B=2, C=1 |
+| `latest_score` | Inspection score (lower = better) |
+| `latest_inspection_date` | Date of most recent inspection |
+| `inspection_count` | Number of inspections on record |
+| `mean_score` | Mean score across all inspections |
+| `min_score` / `max_score` | Score range across all inspections |
+| `days_since_last_inspection` | Days since last inspection (as of preprocessing run date) |
+| `total_violations` | Total violation rows across all inspections |
+| `critical_violations` | Count of critical-flag violations |
+| `non_critical_violations` | Count of non-critical violations |
+| `unique_violation_codes` | Comma-separated list of all violation codes cited |
+
+Load it in Python:
+
+```python
+import pandas as pd
+restaurants = pd.read_csv(
+    "data/restaurants.csv",
+    parse_dates=["latest_grade_date", "latest_inspection_date"]
+)
+```
+
+---
+
+## Part-by-Part Technical Notes
+
+### Part 1 — Data Pipeline
+
+`src/data_loader.py` loads and cleans the raw CSV (column rename, whitespace strip, type casting).  
+`src/preprocessor.py` aggregates violation-level rows into one row per restaurant.
+
+### Part 2 — KNN Grade Classifier (`src/knn_classifier.py`)
+
+- Built from scratch with NumPy only (no scikit-learn).
+- Features: `mean_score`, `critical_violations`, `total_violations`, `days_since_last_inspection`.
+- Distance metric: cosine similarity on z-score-normalised vectors.
+- Temporal train/test split: restaurants sorted by `latest_inspection_date` so the model never sees future data.
+- Demonstrates severe class-imbalance: Grade A is ~88% of the data, so KNN almost always predicts A.
+
+### Part 3 — Decision Tree Grade Classifier (`src/decision_tree.py`)
+
+- Built from scratch with NumPy only.
+- Weighted Gini impurity: each sample weighted by `n / (n_classes × class_count)` so minority grades B and C contribute equally to splits.
+- Engineered features add `min_score`, `max_score`, `score_range`, `inspection_count`, `critical_rate`, `violations_per_inspection`.
+- Output: feature importances, top decision rules, full tree sketch.
+
+### Part 4 — Cuisine Type Predictor (`src/cuisine_predictor.py`)
+
+- **Vectoriser**: `TfidfVectorizer(analyzer="char_wb", ngram_range=(2, 4))` on normalised restaurant names.
+- **Classifier**: `LogisticRegression(class_weight="balanced")` for calibrated multi-class probabilities.
+- **Split options**: stratified random OR geographic hold-out (entire borough as test set).
+- **Output**: top-3 predicted cuisines with probabilities; if the name exists in the dataset the true cuisine is shown.
+- Typical top-1 accuracy: ~45% across 75 cuisine classes (random baseline: ~1.3%).
+
+### Part 5 — Safe Restaurant Route Finder (`src/rl_route_finder.py`)
+
+**RL formulation:**
+
+| Component | Details |
+|---|---|
+| Environment | NYC map: 111 × 113 = 12,543 grid cells (~400 m × 420 m each) |
+| State | `(row, col)` — agent's current grid cell |
+| Actions | 8 compass directions |
+| Reward R(s) | Sum of `safety_score × cuisine_match` for restaurants in the cell, Gaussian-smoothed |
+| Proximity bias | Gaussian decay centred at start: nearby clusters beat globally-larger far clusters |
+| Cuisine filter | Hard threshold on TF-IDF similarity — only matching cuisine restaurants contribute to reward when a description is provided |
+| Discount γ | Derived from the user's walking-time budget (5–20 min); caps the effective search radius |
+| Algorithm | Value Iteration (pure NumPy Bellman updates, ~40 ms on the full grid) |
+
+**Street routing:** After VI finds the destination cell, the actual pedestrian route is fetched from the free OSRM public API (`router.project-osrm.org`) — real street-level waypoints. Falls back to a rectilinear grid approximation if offline.
+
+**Food keyword expansion:** 50+ regex mappings (e.g. `"ramen"` → `"japanese noodles asian"`) bridge the gap between dish names and the dataset's generic cuisine labels before TF-IDF vectorisation.
+
+**Walk budget presets:**
+
+| Preset | Distance | γ | Max hops |
+|---|---|---|---|
+| 5 min | ~375 m | 0.50 | 2 |
+| 10 min | ~750 m | 0.70 | 4 |
+| 15 min | ~1.1 km | 0.80 | 6 |
+| 20 min | ~1.5 km | 0.85 | 8 |
 
 ---
 
@@ -194,35 +234,38 @@ Fuzzy-Rabbits-Safe-Restaurant-Finder/
 │   └── restaurants.csv                                                  # generated by preprocessor
 ├── src/
 │   ├── __init__.py
-│   ├── data_loader.py       # loads and cleans raw CSV
-│   └── preprocessor.py      # aggregates to restaurant level
-├── streamlit_app.py         # interactive dashboard
+│   ├── data_loader.py        # loads and cleans the raw DOHMH CSV
+│   ├── preprocessor.py       # aggregates violation rows → one row per restaurant
+│   ├── knn_classifier.py     # Part 2: from-scratch KNN (NumPy only)
+│   ├── decision_tree.py      # Part 3: from-scratch weighted Decision Tree (NumPy only)
+│   ├── cuisine_predictor.py  # Part 4: TF-IDF + Logistic Regression cuisine classifier
+│   └── rl_route_finder.py    # Part 5: Value Iteration RL route planner
+├── streamlit_app.py          # five-tab interactive dashboard
 ├── requirements.txt
 └── README.md
 ```
 
 ---
 
-## Daily Git Workflow
+## Git Workflow
 
 ```bash
 # Before starting — sync with main
 git pull origin main
 
-# Create your branch (do this once)
+# Create your branch (once)
 git checkout -b <your-name>/<feature>
 
-# Stage and commit your work
+# Stage, commit, push
 git add src/my_file.py
 git commit -m "Short description of what you did"
-
-# Push to GitHub
 git push origin <your-name>/<feature>
 ```
 
-Then open a Pull Request on GitHub. Get one teammate to review it before merging.
+Open a Pull Request on GitHub. Get one teammate to review before merging.  
+**Never commit directly to `main`.**
 
-**Branch naming convention:**
+### Branch naming convention
 
 | Person | Branch |
 |---|---|
@@ -232,11 +275,9 @@ Then open a Pull Request on GitHub. Get one teammate to review it before merging
 | Yuxi | `yuxi/streamlit-ui` |
 | Wendy | `wendy/documentation` |
 
-**Never commit directly to `main`.**
-
 ---
 
-## Quick Reference
+## Quick Git Reference
 
 ```bash
 git pull origin main              # sync with latest

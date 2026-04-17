@@ -33,7 +33,6 @@ import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import LabelEncoder
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -185,7 +184,6 @@ class CuisinePredictor:
         self.vectorizer_: TfidfVectorizer | None = None
         self.clf_: LogisticRegression | None = None
         self.classes_: list[str] = []
-        self.label_encoder_: LabelEncoder | None = None
 
     # ------------------------------------------------------------------
     def fit(self, X_train: list[str], y_train: list[str]) -> "CuisinePredictor":

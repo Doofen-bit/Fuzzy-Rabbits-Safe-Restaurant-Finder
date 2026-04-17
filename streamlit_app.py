@@ -1,7 +1,7 @@
 """
 streamlit_app.py
 ----------------
-NYC Safe Restaurant Finder — interactive Streamlit dashboard.
+NYC Safe Restaurant Finder — five-part interactive Streamlit dashboard.
 
 Part 1 — Data & Exploration
     1.1  Three-step preprocessing pipeline (raw CSV → restaurants.csv)
@@ -17,8 +17,20 @@ Part 3 — Decision Tree Grade Classifier
     weights, engineered features, and full interpretability (feature importance,
     decision rules).  Directly addresses every weakness identified in Part 2.
 
+Part 4 — Cuisine Type Predictor
+    scikit-learn TF-IDF (char n-grams) + Logistic Regression predicts a
+    restaurant's cuisine type from its name alone.  Supports random and
+    geographic (borough hold-out) train/test splits.  Returns top-3 cuisine
+    predictions with probabilities.
+
+Part 5 — Safe Restaurant Route Finder
+    Reinforcement Learning (Value Iteration, pure NumPy) plans a short walking
+    route from the user's NYC location to the nearest cluster of safe,
+    cuisine-matching restaurants.  Route displayed on a real OpenStreetMap via
+    Folium; street-level waypoints fetched from the OSRM public API.
+
 Run with:
-    streamlit run streamlit_app.py
+    python -m streamlit run streamlit_app.py
 """
 
 from __future__ import annotations
@@ -57,6 +69,19 @@ from src.cuisine_predictor import (
     cuisine_accuracy,
     top3_accuracy,
     per_cuisine_f1,
+)
+from src.rl_route_finder import (
+    find_safe_route,
+    NYC_NEIGHBORHOODS,
+    WALK_PRESETS,
+    RouteResult,
+    GRID_ROWS,
+    GRID_COLS,
+    LAT_MIN, LAT_MAX,
+    LNG_MIN, LNG_MAX,
+    GRID_LAT_RES,
+    GRID_LNG_RES,
+    cell_to_latlng,
 )
 
 # ---------------------------------------------------------------------------
@@ -176,19 +201,20 @@ def _sidebar_filters(restaurants: pd.DataFrame) -> pd.DataFrame:
 # ===========================================================================
 st.title("NYC Safe Restaurant Finder")
 st.markdown(
-    "Three-part interactive dashboard: **data pipeline**, "
-    "**KNN baseline classifier**, and a **smarter Decision Tree classifier** "
-    "— all built from scratch on 295,995 DOHMH inspection records."
+    "Five-part interactive dashboard: **data pipeline**, **KNN classifier**, "
+    "**Decision Tree classifier**, **cuisine-type predictor**, and a "
+    "**RL-powered safe route finder** — built on 295,995 DOHMH inspection records."
 )
 
 _restaurants = _load_restaurants()
 _filtered    = _sidebar_filters(_restaurants)
 
-tab1, tab2, tab3, tab4 = st.tabs([
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "Part 1: Data & Exploration",
     "Part 2: KNN Classifier",
     "Part 3: Decision Tree Classifier",
     "Part 4: Cuisine Predictor",
+    "Part 5: Safe Restaurant Route",
 ])
 
 
@@ -1392,3 +1418,477 @@ Predict what **type of cuisine** a restaurant serves — using only its **name**
         st.info(
             "Configure parameters above and click **Train Cuisine Predictor** to train the model."
         )
+
+
+# ===========================================================================
+# PART 5 — SAFE RESTAURANT ROUTE FINDER  (Reinforcement Learning)
+# ===========================================================================
+import folium
+from folium.plugins import HeatMap, MarkerCluster
+from streamlit_folium import st_folium
+
+with tab5:
+    st.header("Part 5: Safe Restaurant Route Finder")
+    st.markdown(
+        """
+Find the **nearest cluster of safe, cuisine-matching restaurants** from your NYC
+location — planned by a Reinforcement Learning agent and displayed on a real
+OpenStreetMap street map.
+
+| RL Component | Details |
+|---|---|
+| **State** | ~400 m × 420 m grid cell (111 × 113 = 12,543 cells covering all of NYC) |
+| **Action** | Move in one of 8 compass directions |
+| **Reward R(s)** | Safety scores (A=3 B=2 C=1) of cuisine-filtered restaurants, weighted by proximity Gaussian |
+| **Discount γ** | Derived from walking-time budget — keeps routes within a realistic radius |
+| **Algorithm** | **Value Iteration** — Bellman update fully vectorised with NumPy |
+| **Street routing** | Real pedestrian route via **OSRM** public API (OpenStreetMap); grid fallback if offline |
+        """
+    )
+
+    # ── 5.1  Location — interactive folium map ──────────────────────────────
+    st.subheader("5.1  Your Location")
+    st.markdown(
+        "**Click anywhere on the map** to set your starting point, "
+        "or pick a neighbourhood from the dropdown."
+    )
+
+    _nb_names = list(NYC_NEIGHBORHOODS.keys())
+    sel_nb_p5 = st.selectbox(
+        "Quick-jump to a neighbourhood",
+        _nb_names, index=0, key="p5_neighborhood",
+    )
+    _default_lat, _default_lng = NYC_NEIGHBORHOODS[sel_nb_p5]
+
+    # Determine current user location (click overrides dropdown)
+    _p5_lat = st.session_state.get("p5_click_lat", _default_lat)
+    _p5_lng = st.session_state.get("p5_click_lng", _default_lng)
+
+    # Update to dropdown value when neighbourhood changes (but not on click)
+    if st.session_state.get("p5_last_nb") != sel_nb_p5:
+        _p5_lat = _default_lat
+        _p5_lng = _default_lng
+        st.session_state["p5_click_lat"] = _p5_lat
+        st.session_state["p5_click_lng"] = _p5_lng
+        st.session_state["p5_last_nb"]   = sel_nb_p5
+
+    # ── Input map ─────────────────────────────────────────────────────────
+    _input_map = folium.Map(
+        location=[_p5_lat, _p5_lng],
+        zoom_start=14,
+        tiles="OpenStreetMap",
+        width="100%",
+    )
+    # Current location marker
+    folium.Marker(
+        [_p5_lat, _p5_lng],
+        tooltip="Your location (click map to move)",
+        icon=folium.Icon(color="blue", icon="home", prefix="fa"),
+    ).add_to(_input_map)
+    # NYC boundary rect for orientation
+    folium.Rectangle(
+        bounds=[[LAT_MIN, LNG_MIN], [LAT_MAX, LNG_MAX]],
+        color="#4C8BF5", fill=False, weight=1, dash_array="6",
+        tooltip="NYC bounding box",
+    ).add_to(_input_map)
+
+    _map_data = st_folium(
+        _input_map, width="100%", height=380, key="p5_input_map",
+        returned_objects=["last_clicked"],
+    )
+    if _map_data and _map_data.get("last_clicked"):
+        _clicked = _map_data["last_clicked"]
+        _new_lat = round(float(_clicked["lat"]), 6)
+        _new_lng = round(float(_clicked["lng"]), 6)
+        # Only update if click is inside NYC bounding box
+        if LAT_MIN <= _new_lat <= LAT_MAX and LNG_MIN <= _new_lng <= LNG_MAX:
+            st.session_state["p5_click_lat"] = _new_lat
+            st.session_state["p5_click_lng"] = _new_lng
+            _p5_lat, _p5_lng = _new_lat, _new_lng
+        else:
+            st.warning("Click is outside the NYC bounding box — please click within NYC.")
+
+    st.caption(
+        f"Starting location: **{_p5_lat:.5f}°N, {abs(_p5_lng):.5f}°W** "
+        f"— click the map above to change"
+    )
+
+    # ── 5.2  Meal preference ───────────────────────────────────────────────
+    st.markdown("---")
+    st.subheader("5.2  What do you feel like eating?  *(optional)*")
+
+    _col_meal, _col_imp = st.columns([3, 2])
+    with _col_meal:
+        meal_desc_p5 = st.text_input(
+            "Describe your meal craving",
+            key="p5_meal_desc",
+            placeholder="e.g. spicy ramen, wood-fired pizza, dim sum, tacos …",
+            help="sklearn TF-IDF + cosine similarity matches this to cuisine labels.",
+        )
+    with _col_imp:
+        cuisine_imp_p5 = st.slider(
+            "Cuisine filter strictness",
+            0, 100, 70, step=10, key="p5_cuisine_imp",
+            help=(
+                "0% — all restaurants count equally (description ignored for filtering).  \n"
+                "100% — only the single best-matching cuisine type counts.  \n"
+                "70% is a good default: strict enough to route to matching clusters, "
+                "loose enough to find nearby options."
+            ),
+        )
+    if meal_desc_p5.strip():
+        st.caption(
+            "Cuisine match preview (requires training — shown after **Find Route** is clicked)."
+        )
+
+    # ── 5.3  Hyperparameters ───────────────────────────────────────────────
+    st.markdown("---")
+    st.subheader("5.3  Route Hyperparameters")
+
+    _preset_keys = list(WALK_PRESETS.keys())
+    _col_walk, _col_danger = st.columns([3, 2])
+
+    with _col_walk:
+        walk_preset_p5 = st.select_slider(
+            "Maximum walking budget",
+            options=_preset_keys,
+            value="15 min (~1.1 km)",
+            key="p5_walk_preset",
+            help=(
+                "Sets the RL discount factor γ and max path steps to match a "
+                "realistic walking radius.  Routes will never exceed this budget.  \n"
+                "**5 min** ≈ 375 m • **10 min** ≈ 750 m • **20 min** ≈ 1.5 km"
+            ),
+        )
+        _pr = WALK_PRESETS[walk_preset_p5]
+        st.caption(
+            f"γ = {_pr['gamma']} · max {_pr['max_steps']} hops · "
+            f"proximity σ = {_pr['sigma_km']} km · "
+            f"~{_pr['walk_km']*1000:.0f} m walking radius"
+        )
+
+    with _col_danger:
+        danger_p5 = st.checkbox(
+            "Exclude Grade C restaurants",
+            value=True, key="p5_danger",
+            help="Grade C restaurants contribute 0 to reward. "
+                 "They appear in a warning list in the results.",
+        )
+        use_osrm_p5 = st.checkbox(
+            "Use real street routing (OSRM)",
+            value=True, key="p5_osrm",
+            help="Calls the free OSRM pedestrian API for street-following routes. "
+                 "Disable if offline — falls back to grid approximation.",
+        )
+
+    # ── 5.4  Find Route ────────────────────────────────────────────────────
+    st.markdown("---")
+    _run_p5 = st.button(
+        "Find Safe Restaurant Route",
+        type="primary", key="p5_run_btn",
+    )
+
+    if _run_p5:
+        _rdf = _load_restaurants()
+        with st.spinner("Running Value Iteration and fetching street route…"):
+            _p5_result = find_safe_route(
+                _rdf,
+                user_lat=_p5_lat,
+                user_lng=_p5_lng,
+                meal_description=meal_desc_p5,
+                walk_preset_key=walk_preset_p5,
+                cuisine_importance=cuisine_imp_p5 / 100.0,
+                danger_filter=danger_p5,
+                destination_radius_cells=2,
+                smooth_sigma=1.0,
+                use_osrm=use_osrm_p5,
+            )
+        st.session_state["p5_result"]     = _p5_result
+        st.session_state["p5_res_lat"]    = _p5_lat
+        st.session_state["p5_res_lng"]    = _p5_lng
+        st.session_state["p5_res_preset"] = walk_preset_p5
+
+    # ── 5.5  Results ───────────────────────────────────────────────────────
+    _p5r: RouteResult | None = st.session_state.get("p5_result")
+
+    if _p5r is not None:
+        _res_lat = st.session_state.get("p5_res_lat", _p5_lat)
+        _res_lng = st.session_state.get("p5_res_lng", _p5_lng)
+
+        st.markdown("---")
+        st.subheader("5.5  Results")
+
+        # ── Top-level metrics ────────────────────────────────────────────
+        _mc1, _mc2, _mc3, _mc4, _mc5 = st.columns(5)
+        _mc1.metric("Walk distance",    f"{_p5r.path_distance_km:.2f} km")
+        _mc2.metric("Est. walk time",   f"{_p5r.walk_minutes:.0f} min")
+        _mc3.metric("Restaurants found", f"{_p5r.n_destination_restaurants:,}")
+        _mean_g = _p5r.mean_destination_safety
+        _mc4.metric(
+            "Avg safety grade",
+            f"{'A' if _mean_g >= 2.7 else 'B' if _mean_g >= 1.7 else 'C'} ({_mean_g:.1f})",
+        )
+        _route_src = "OSRM (real streets)" if _p5r.street_route else "Grid approx."
+        _mc5.metric("Route source", _route_src)
+
+        if _p5r.top_matches:
+            _top_m_str = " · ".join(f"**{c}** ({s:.2f})" for c, s in _p5r.top_matches[:3])
+            st.caption(f"Cuisine matches: {_top_m_str}")
+
+        # ── Route map (Folium) ────────────────────────────────────────────
+        st.markdown("#### Route — walking path on real NYC streets")
+
+        # Choose route to display: OSRM real streets, or grid fallback
+        _display_route = _p5r.street_route if _p5r.street_route else _p5r.grid_route
+
+        # Centre map between start and destination
+        _ctr_lat = (_res_lat + _p5r.destination_lat) / 2
+        _ctr_lng = (_res_lng + _p5r.destination_lng) / 2
+        _span    = max(
+            abs(_res_lat - _p5r.destination_lat),
+            abs(_res_lng - _p5r.destination_lng) * 0.75,
+            0.005,
+        )
+        _zoom    = max(13, int(14 - _span * 120))
+
+        _rmap = folium.Map(
+            location=[_ctr_lat, _ctr_lng],
+            zoom_start=_zoom,
+            tiles="OpenStreetMap",
+            width="100%",
+        )
+
+        # 1. Walking route polyline
+        if len(_display_route) >= 2:
+            folium.PolyLine(
+                locations=_display_route,
+                color="#FF8C00",
+                weight=5,
+                opacity=0.95,
+                tooltip="Walking route",
+            ).add_to(_rmap)
+
+        # 2. Start marker
+        folium.Marker(
+            location=[_res_lat, _res_lng],
+            tooltip="Your starting location",
+            icon=folium.Icon(color="blue", icon="home", prefix="fa"),
+        ).add_to(_rmap)
+
+        # 3. Destination marker
+        folium.Marker(
+            location=[_p5r.destination_lat, _p5r.destination_lng],
+            tooltip=(
+                f"Destination cluster — "
+                f"{_p5r.n_destination_restaurants} restaurants nearby"
+            ),
+            icon=folium.Icon(color="purple", icon="flag", prefix="fa"),
+        ).add_to(_rmap)
+
+        # 4. Destination restaurants (clustered for performance)
+        _dest_df = _p5r.destination_restaurants
+        if not _dest_df.empty:
+            _rest_cluster = MarkerCluster(
+                name="Restaurants at destination",
+                show=True,
+            ).add_to(_rmap)
+
+            _grade_icon_color = {"A": "green", "B": "orange", "C": "red"}
+
+            for _, _row in _dest_df.dropna(subset=["latitude","longitude"]).iterrows():
+                _g    = str(_row.get("latest_grade", ""))
+                _icol = _grade_icon_color.get(_g, "gray")
+                _score_str = (
+                    f"Score: {_row['latest_score']:.0f}"
+                    if pd.notna(_row.get("latest_score")) else "Score: —"
+                )
+                _addr = " ".join(filter(None, [
+                    str(_row.get("building", "") or ""),
+                    str(_row.get("street", "") or ""),
+                ]))
+                folium.Marker(
+                    location=[float(_row["latitude"]), float(_row["longitude"])],
+                    tooltip=folium.Tooltip(
+                        f"<b>{_row.get('dba','?')}</b><br>"
+                        f"Cuisine: {_row.get('cuisine','—')}<br>"
+                        f"Grade: <b>{_g or '—'}</b>  {_score_str}<br>"
+                        f"{_addr}"
+                    ),
+                    icon=folium.Icon(color=_icol, icon="cutlery", prefix="fa"),
+                ).add_to(_rest_cluster)
+
+        # 5. Terrible restaurants (red warning markers)
+        if danger_p5 and not _p5r.terrible_restaurants.empty:
+            _terr_fg = folium.FeatureGroup(name="Grade C (filtered)", show=True)
+            for _, _row in _p5r.terrible_restaurants.dropna(
+                subset=["latitude","longitude"]
+            ).iterrows():
+                folium.CircleMarker(
+                    location=[float(_row["latitude"]), float(_row["longitude"])],
+                    radius=5,
+                    color="#CC0000",
+                    fill=True,
+                    fill_opacity=0.6,
+                    tooltip=folium.Tooltip(
+                        f"<b>{_row.get('dba','?')}</b><br>"
+                        f"Grade C — excluded from reward<br>"
+                        f"Score: {_row.get('latest_score','—')}"
+                    ),
+                ).add_to(_terr_fg)
+            _terr_fg.add_to(_rmap)
+
+        folium.LayerControl(collapsed=False).add_to(_rmap)
+        st_folium(_rmap, width="100%", height=600, key="p5_result_map",
+                  returned_objects=[])
+
+        # Map legend
+        _lcols = st.columns(5)
+        for _lc, (_label, _color) in zip(_lcols, [
+            ("Start",           "#1E82FF"),
+            ("Destination",     "#9933CC"),
+            ("Walk route",      "#FF8C00"),
+            ("Grade A/B rest.", "#228B22"),
+            ("Grade C (nearby)","#CC0000"),
+        ]):
+            _lc.markdown(
+                f"<span style='display:inline-block;width:12px;height:12px;"
+                f"background:{_color};border-radius:50%;margin-right:5px'></span>"
+                f"<small>{_label}</small>",
+                unsafe_allow_html=True,
+            )
+
+        # ── Cuisine match breakdown ──────────────────────────────────────
+        if _p5r.top_matches:
+            st.markdown("---")
+            st.subheader("5.6  Cuisine Match Breakdown")
+            st.caption(
+                f"TF-IDF cosine similarity: *\"{meal_desc_p5}\"* vs. each cuisine label. "
+                f"Filter strictness = {cuisine_imp_p5}%"
+            )
+            _tm_df = pd.DataFrame(_p5r.top_matches, columns=["Cuisine", "Match Score"])
+            _fig_tm = px.bar(
+                _tm_df, x="Match Score", y="Cuisine", orientation="h",
+                color="Match Score", color_continuous_scale="Teal",
+                title="Top-5 cuisine matches for your description",
+                height=280,
+            )
+            _fig_tm.update_layout(
+                coloraxis_showscale=False, yaxis_title="",
+                margin=dict(l=160, t=50, b=10),
+                xaxis=dict(range=[0, 1.05]),
+            )
+            st.plotly_chart(_fig_tm, use_container_width=True)
+
+        # ── RL Value-function heatmap ────────────────────────────────────
+        st.markdown("---")
+        st.subheader("5.7  RL Value Function — NYC Heatmap")
+        st.markdown(
+            "The **converged V(s)** for every grid cell.  Brighter = higher discounted "
+            "future return from that cell.  The Gaussian proximity bias means the "
+            "hot-spot is near your starting location.  Your route traces the "
+            "gradient toward the nearest bright cluster."
+        )
+
+        # Build heatmap data from value_map (downsample stride=2)
+        _V  = _p5r.value_map
+        _Vn = (_V - _V.min()) / (_V.max() - _V.min() + 1e-8)
+        _hm_data: list = []
+        _STRIDE = 2
+        for _ri in range(0, GRID_ROWS, _STRIDE):
+            for _ci in range(0, GRID_COLS, _STRIDE):
+                _v = float(_Vn[_ri, _ci])
+                if _v > 0.08:
+                    _hl, _hw = cell_to_latlng(_ri, _ci)
+                    _hm_data.append([_hl, _hw, _v])
+
+        _vmap = folium.Map(
+            location=[40.710, -73.985],
+            zoom_start=11,
+            tiles="CartoDB dark_matter",
+        )
+        HeatMap(
+            _hm_data,
+            min_opacity=0.25,
+            radius=16,
+            blur=12,
+            gradient={0.2: "#0000ff", 0.5: "#00ffff", 0.75: "#ffff00", 1.0: "#ff0000"},
+        ).add_to(_vmap)
+
+        # Overlay route + start
+        if len(_display_route) >= 2:
+            folium.PolyLine(_display_route, color="#FFFF00", weight=4,
+                            opacity=0.9).add_to(_vmap)
+        folium.CircleMarker(
+            [_res_lat, _res_lng], radius=8,
+            color="#1E82FF", fill=True, fill_color="#1E82FF",
+            tooltip="Your starting location",
+        ).add_to(_vmap)
+        folium.CircleMarker(
+            [_p5r.destination_lat, _p5r.destination_lng], radius=8,
+            color="#CC44FF", fill=True, fill_color="#CC44FF",
+            tooltip="Destination cluster",
+        ).add_to(_vmap)
+
+        st_folium(_vmap, width="100%", height=480, key="p5_vmap",
+                  returned_objects=[])
+
+        # ── Destination restaurants table ────────────────────────────────
+        st.markdown("---")
+        st.subheader("5.8  Recommended Restaurants at Destination")
+        st.caption(
+            f"{_p5r.n_destination_restaurants:,} restaurants within ~{2 * 0.43:.1f} km "
+            f"of destination  ·  "
+            f"({_p5r.destination_lat:.4f}°N, {abs(_p5r.destination_lng):.4f}°W)"
+        )
+
+        if not _dest_df.empty:
+            _show_cols = ["dba", "cuisine", "latest_grade", "latest_score",
+                          "boro", "building", "street"]
+            _show_cols = [c for c in _show_cols if c in _dest_df.columns]
+            _disp = _dest_df[_show_cols].copy()
+
+            if "latest_grade" in _disp.columns:
+                _go = {"A": 0, "B": 1, "C": 2}
+                _disp["_gs"] = _disp["latest_grade"].map(_go).fillna(3)
+                _disp = _disp.sort_values(["_gs", "latest_score"],
+                                          ascending=[True, True]).drop(columns=["_gs"])
+
+            st.dataframe(_disp.head(20).reset_index(drop=True),
+                         use_container_width=True, height=380)
+
+            _gc = _dest_df["latest_grade"].fillna("No grade").value_counts().reset_index()
+            _gc.columns = ["grade", "count"]
+            _fig_gc = px.pie(
+                _gc, names="grade", values="count", color="grade",
+                color_discrete_map={**GRADE_COLOR_HEX, "No grade": "#9E9E9E"},
+                title="Grade distribution at destination cluster",
+                hole=0.4, height=280,
+            )
+            _fig_gc.update_layout(margin=dict(t=50, b=10))
+            st.plotly_chart(_fig_gc, use_container_width=True)
+
+        # ── Terrible restaurants warning table ───────────────────────────
+        if danger_p5 and not _p5r.terrible_restaurants.empty:
+            st.markdown("---")
+            st.subheader("5.9  Grade C Restaurants Near Your Route")
+            st.warning(
+                f"**{len(_p5r.terrible_restaurants)}** Grade-C restaurants are within "
+                "~2 km of your route.  These were **excluded** from the RL reward — "
+                "the agent actively routed away from them."
+            )
+            _tc = [c for c in ["dba", "cuisine", "latest_grade", "latest_score",
+                                "boro", "building", "street"]
+                   if c in _p5r.terrible_restaurants.columns]
+            st.dataframe(
+                _p5r.terrible_restaurants[_tc]
+                .sort_values("latest_score", ascending=False)
+                .reset_index(drop=True),
+                use_container_width=True, height=280,
+            )
+
+    else:
+        st.info(
+            "Set your location, optionally describe what you want to eat, "
+            "adjust the walk budget, then click **Find Safe Restaurant Route**."
+        )
+

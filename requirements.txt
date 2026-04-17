@@ -3,3 +3,8 @@ numpy
 streamlit
 pydeck
 plotly
+scikit-learn
+scipy
+folium
+streamlit-folium
+requests

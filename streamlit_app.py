@@ -50,6 +50,14 @@ from src.decision_tree import (
     DT_EXTRA_FEATURES,
     prepare_dt_data,
 )
+from src.cuisine_predictor import (
+    CuisinePredictor,
+    BOROUGHS,
+    prepare_cuisine_data,
+    cuisine_accuracy,
+    top3_accuracy,
+    per_cuisine_f1,
+)
 
 # ---------------------------------------------------------------------------
 # Page config
@@ -176,10 +184,11 @@ st.markdown(
 _restaurants = _load_restaurants()
 _filtered    = _sidebar_filters(_restaurants)
 
-tab1, tab2, tab3 = st.tabs([
+tab1, tab2, tab3, tab4 = st.tabs([
     "Part 1: Data & Exploration",
     "Part 2: KNN Classifier",
     "Part 3: Decision Tree Classifier",
+    "Part 4: Cuisine Predictor",
 ])
 
 
@@ -1108,4 +1117,278 @@ can use 6 engineered features, giving it more signal to distinguish B/C from A.
             "Configure parameters above and click **Train & Evaluate Decision Tree** "
             "to run the classifier.  \n"
             "Tip: run Part 2 first so the KNN vs Decision Tree comparison table appears here."
+        )
+
+
+# ===========================================================================
+# PART 4 — CUISINE TYPE PREDICTOR (restaurant name → cuisine)
+# ===========================================================================
+with tab4:
+    st.header("Part 4: Cuisine Type Predictor")
+    st.markdown(
+        """
+Predict what **type of cuisine** a restaurant serves — using only its **name**.
+
+**How it works:**
+1. Restaurant names are normalised (lowercased, punctuation stripped).
+2. A **TF-IDF vectorizer** with character n-grams (2–4 chars) converts each name
+   into a sparse vector capturing linguistic patterns like *"burger"*, *"sushi"*,
+   *"taqueria"*.
+3. A **Logistic Regression** classifier (balanced class weights, multinomial softmax)
+   is trained on those vectors.
+4. At prediction time the model returns the **top-3 predicted cuisine types** with
+   their probability scores.
+
+> Names already in the dataset show the **actual** recorded cuisine next to the predictions.
+        """
+    )
+
+    # ── 4.1  Parameters ────────────────────────────────────────────────────
+    st.subheader("4.1  Parameters")
+
+    col_split_method, col_split_param = st.columns(2)
+    with col_split_method:
+        split_method_p4 = st.radio(
+            "Train / test split method",
+            ["Completely random", "Hold out one area (borough)"],
+            key="p4_split_method",
+            help=(
+                "**Completely random** — stratified random split, samples from "
+                "every borough end up in both sets.  \n"
+                "**Hold out one area** — every restaurant from the chosen borough "
+                "becomes the test set; the rest train. Tests geographic generalisation."
+            ),
+        )
+    with col_split_param:
+        if split_method_p4 == "Completely random":
+            test_pct_p4 = st.slider(
+                "Test set size (%)", 10, 40, 20, step=5, key="p4_test_pct"
+            )
+            test_area_p4 = "Manhattan"   # unused
+        else:
+            test_area_p4 = st.selectbox(
+                "Borough to use as test set", BOROUGHS, index=2, key="p4_test_area"
+            )
+            test_pct_p4 = 20   # unused
+
+    col_c, col_ng, col_min = st.columns(3)
+    with col_c:
+        reg_C_p4 = st.select_slider(
+            "Regularisation C (higher = less regularised)",
+            options=[0.1, 0.5, 1.0, 2.0, 5.0], value=1.0, key="p4_C"
+        )
+    with col_ng:
+        ngram_max_p4 = st.slider(
+            "Max char n-gram size", 2, 6, 4, key="p4_ngram",
+            help="Larger n-grams capture longer word fragments. Range is (2, max)."
+        )
+    with col_min:
+        min_count_p4 = st.slider(
+            "Min restaurants per cuisine", 5, 50, 10, step=5, key="p4_min_count",
+            help="Cuisines with fewer restaurants are excluded from training."
+        )
+
+    st.markdown("---")
+
+    # ── 4.2  Train ─────────────────────────────────────────────────────────
+    st.subheader("4.2  Train Model")
+
+    run_p4 = st.button("Train Cuisine Predictor", type="primary", key="p4_run_btn")
+
+    if run_p4:
+        restaurants_p4 = _load_restaurants()
+        split_enum = "random" if split_method_p4 == "Completely random" else "by_area"
+
+        with st.spinner("Preparing data & training…"):
+            (
+                X_train_p4, X_test_p4, y_train_p4, y_test_p4,
+                train_df_p4, test_df_p4, kept_p4,
+            ) = prepare_cuisine_data(
+                restaurants_p4,
+                split_method=split_enum,
+                test_fraction=test_pct_p4 / 100,
+                test_area=test_area_p4,
+                min_cuisine_count=min_count_p4,
+            )
+
+            predictor_p4 = CuisinePredictor(
+                ngram_range=(2, ngram_max_p4),
+                C=reg_C_p4,
+            )
+            predictor_p4.fit(X_train_p4, y_train_p4)
+
+            y_pred_p4 = predictor_p4.predict_batch(X_test_p4)
+            acc_p4    = cuisine_accuracy(y_test_p4, y_pred_p4)
+            top3_acc  = top3_accuracy(predictor_p4, X_test_p4, y_test_p4)
+            per_cls   = per_cuisine_f1(y_test_p4, y_pred_p4, kept_p4)
+
+        st.session_state["p4_results"] = {
+            "predictor":    predictor_p4,
+            "X_test":       X_test_p4,
+            "y_test":       y_test_p4,
+            "y_pred":       y_pred_p4,
+            "train_df":     train_df_p4,
+            "test_df":      test_df_p4,
+            "kept":         kept_p4,
+            "acc":          acc_p4,
+            "top3_acc":     top3_acc,
+            "per_cls":      per_cls,
+            "n_train":      len(X_train_p4),
+            "n_test":       len(X_test_p4),
+            "n_cuisines":   len(kept_p4),
+            "split_method": split_method_p4,
+            "test_area":    test_area_p4 if split_enum == "by_area" else None,
+        }
+
+    res_p4 = st.session_state.get("p4_results")
+
+    # ── 4.3  Evaluation ────────────────────────────────────────────────────
+    if res_p4 is not None:
+        st.markdown("---")
+        st.subheader("4.3  Model Performance")
+
+        split_note = (
+            f"Split: **{res_p4['split_method']}**"
+            + (f" — test area: **{res_p4['test_area']}**" if res_p4["test_area"] else "")
+        )
+        st.caption(
+            f"Train: {res_p4['n_train']:,} restaurants  |  "
+            f"Test: {res_p4['n_test']:,} restaurants  |  "
+            f"Cuisine classes: {res_p4['n_cuisines']}  |  {split_note}"
+        )
+
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Top-1 Accuracy", f"{res_p4['acc']:.1%}",
+                  help="Fraction of test restaurants where predicted #1 cuisine is correct.")
+        m2.metric("Top-3 Accuracy", f"{res_p4['top3_acc']:.1%}",
+                  help="Fraction where correct cuisine appears in top-3 predictions.")
+        m3.metric("Cuisine classes", res_p4["n_cuisines"])
+
+        # Per-cuisine F1 chart (top 20 by support)
+        per_cls_df = res_p4["per_cls"]
+        top20 = per_cls_df.head(20).sort_values("F1", ascending=True)
+        fig_f1 = px.bar(
+            top20, x="F1", y="Cuisine", orientation="h",
+            color="F1", color_continuous_scale="Teal",
+            title="F1-score — top 20 cuisines by support",
+            hover_data=["Precision", "Recall", "Support"],
+            height=max(350, len(top20) * 22),
+        )
+        fig_f1.update_layout(
+            coloraxis_showscale=False, yaxis_title="",
+            margin=dict(l=150, t=50, b=20),
+        )
+        st.plotly_chart(fig_f1, use_container_width=True)
+
+        with st.expander("Full per-cuisine metrics table"):
+            st.dataframe(per_cls_df, use_container_width=True, hide_index=True)
+
+        # ── 4.4  Interactive Predictor ──────────────────────────────────
+        st.markdown("---")
+        st.subheader("4.4  Try It — Predict Cuisine from Restaurant Name")
+
+        predictor_obj = res_p4["predictor"]
+        test_df_ref   = res_p4["test_df"]
+
+        # Randomise suggestion from test set
+        col_input, col_suggest = st.columns([3, 1])
+        with col_suggest:
+            suggest_btn = st.button(
+                "Randomise from test set", key="p4_suggest_btn",
+                help="Pick a random restaurant from the test data for you to try."
+            )
+            if suggest_btn or "p4_suggested_name" not in st.session_state:
+                if not test_df_ref.empty:
+                    rng_row = test_df_ref.sample(1, random_state=None).iloc[0]
+                    st.session_state["p4_suggested_name"] = rng_row["dba"]
+                    st.session_state["p4_suggested_cuisine"] = rng_row["cuisine"]
+
+        with col_input:
+            restaurant_input = st.text_input(
+                "Enter a restaurant name",
+                value=st.session_state.get("p4_suggested_name", ""),
+                key="p4_name_input",
+                placeholder="e.g. Golden Dragon, Taco Bell, Il Forno…",
+            )
+
+        suggested_name = st.session_state.get("p4_suggested_name", "")
+        if suggested_name and not suggest_btn:
+            st.caption(
+                f"Suggestion from test set: **{suggested_name}** "
+                f"(actual cuisine: *{st.session_state.get('p4_suggested_cuisine', '?')}*)"
+            )
+
+        if restaurant_input.strip():
+            name_query = restaurant_input.strip()
+            top3 = predictor_obj.predict_top3(name_query)
+
+            st.markdown(f"### Predictions for: *{name_query}*")
+
+            # Check if name exists in the full dataset
+            all_restaurants = _load_restaurants()
+            match = all_restaurants[
+                all_restaurants["dba"].str.strip().str.lower()
+                == name_query.lower()
+            ]
+
+            if not match.empty:
+                actual_cuisine = match.iloc[0]["cuisine"]
+                st.success(
+                    f"**Found in dataset!** Actual recorded cuisine: "
+                    f"**{actual_cuisine}**"
+                )
+            else:
+                st.info(
+                    "This restaurant name is not in our dataset — showing model predictions only."
+                )
+                actual_cuisine = None
+
+            # Top-3 results
+            st.markdown("**Top-3 predicted cuisine types:**")
+            for rank, (cuisine, prob) in enumerate(top3, 1):
+                is_correct = (actual_cuisine is not None and cuisine == actual_cuisine)
+                bar_color  = "#2ecc71" if is_correct else "#4C8BF5"
+                tick       = " ✓" if is_correct else ""
+
+                col_rank, col_bar, col_pct = st.columns([0.5, 5, 1])
+                with col_rank:
+                    st.markdown(f"**#{rank}**")
+                with col_bar:
+                    fill_pct = int(prob * 100)
+                    st.markdown(
+                        f"<div style='background:#2a2a3e;border-radius:6px;overflow:hidden;height:28px'>"
+                        f"<div style='background:{bar_color};width:{fill_pct}%;height:100%;"
+                        f"display:flex;align-items:center;padding-left:8px;"
+                        f"color:white;font-weight:bold;font-size:14px'>"
+                        f"{cuisine}{tick}"
+                        f"</div></div>",
+                        unsafe_allow_html=True,
+                    )
+                with col_pct:
+                    st.markdown(
+                        f"<div style='text-align:right;line-height:28px;font-weight:bold'>"
+                        f"{prob:.1%}</div>",
+                        unsafe_allow_html=True,
+                    )
+
+            # Pie chart
+            pie_df = pd.DataFrame(top3, columns=["Cuisine", "Probability"])
+            fig_pie = px.pie(
+                pie_df, names="Cuisine", values="Probability",
+                color_discrete_sequence=px.colors.qualitative.Set2,
+                title="Top-3 probability breakdown",
+                hole=0.35,
+            )
+            fig_pie.update_layout(height=320, margin=dict(t=50, b=10))
+            st.plotly_chart(fig_pie, use_container_width=True)
+
+        else:
+            st.info(
+                "Enter a restaurant name above (or click **Randomise from test set**) "
+                "to see cuisine predictions."
+            )
+
+    else:
+        st.info(
+            "Configure parameters above and click **Train Cuisine Predictor** to train the model."
         )

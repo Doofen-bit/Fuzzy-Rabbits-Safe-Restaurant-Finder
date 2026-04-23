@@ -1,7 +1,7 @@
 """
 streamlit_app.py
 ----------------
-NYC Safe Restaurant Finder — five-part interactive Streamlit dashboard.
+NYC Safe Restaurant Finder — six-part interactive Streamlit dashboard.
 
 Part 1 — Data & Exploration
     1.1  Three-step preprocessing pipeline (raw CSV → restaurants.csv)
@@ -28,6 +28,15 @@ Part 5 — Safe Restaurant Route Finder
     route from the user's NYC location to the nearest cluster of safe,
     cuisine-matching restaurants.  Route displayed on a real OpenStreetMap via
     Folium; street-level waypoints fetched from the OSRM public API.
+
+Part 6 — Ultimate Restaurant Finder
+    Everything combined:
+    • KNN + Decision Tree predictions are blended into a continuous safety
+      score (replacing the binary A/B/C lookup) for a richer RL reward signal.
+    • NLP input is embedded into a TF-IDF restaurant matrix — supports dish
+      descriptions, cuisine styles, OR "something like [restaurant name]".
+    • Two navigation modes: Area (RL cluster routing) or Direct (ranked list
+      with next/previous restaurant navigation).
 
 Run with:
     python -m streamlit run streamlit_app.py
@@ -201,20 +210,22 @@ def _sidebar_filters(restaurants: pd.DataFrame) -> pd.DataFrame:
 # ===========================================================================
 st.title("NYC Safe Restaurant Finder")
 st.markdown(
-    "Five-part interactive dashboard: **data pipeline**, **KNN classifier**, "
-    "**Decision Tree classifier**, **cuisine-type predictor**, and a "
-    "**RL-powered safe route finder** — built on 295,995 DOHMH inspection records."
+    "Six-part interactive dashboard: **data pipeline**, **KNN classifier**, "
+    "**Decision Tree classifier**, **cuisine-type predictor**, "
+    "**RL-powered safe route finder**, and the **Ultimate Finder** — "
+    "built on 295,995 DOHMH inspection records."
 )
 
 _restaurants = _load_restaurants()
 _filtered    = _sidebar_filters(_restaurants)
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "Part 1: Data & Exploration",
     "Part 2: KNN Classifier",
     "Part 3: Decision Tree Classifier",
     "Part 4: Cuisine Predictor",
     "Part 5: Safe Restaurant Route",
+    "Part 6: Ultimate Finder",
 ])
 
 
@@ -1892,3 +1903,847 @@ OpenStreetMap street map.
             "adjust the walk budget, then click **Find Safe Restaurant Route**."
         )
 
+
+# ===========================================================================
+# PART 6 — ULTIMATE RESTAURANT FINDER
+# ===========================================================================
+from src.combined_model import CombinedGradePredictor, CLASSES as GRADE_CLASSES
+from src.ultimate_finder import (
+    RestaurantEmbedder,
+    find_area_route,
+    rank_restaurants_direct,
+    get_direct_route_to_restaurant,
+    AreaRouteResult,
+    DirectRouteResult,
+)
+from src.rl_route_finder import WALK_PRESETS as _WALK_PRESETS_P6
+
+with tab6:
+    st.header("Part 6: Ultimate Restaurant Finder")
+    st.markdown(
+        """
+Everything from Parts 1–5 combined into one powerful finder.
+
+| Upgrade | What changed |
+|---|---|
+| **Combined grade score** | KNN + Decision Tree predictions are blended into a continuous safety score (1–3) that replaces the binary A→3 / B→2 / C→1 look-up used in Part 5 |
+| **Restaurant-level NLP** | User input is embedded against a TF-IDF **restaurant matrix** (name + cuisine + borough); supports dish descriptions *and* "find something like [restaurant name]" |
+| **Dual navigation** | **Area mode** — RL routes to the best cluster (like Part 5) · **Direct mode** — route straight to the top-ranked restaurant; advance through the list with Next/Previous |
+        """
+    )
+
+    # ── 6.1  Train the Combined Model ───────────────────────────────────────
+    st.markdown("---")
+    st.subheader("6.1  Train the Combined Grade Predictor")
+    st.markdown(
+        """
+The combined model trains **KNN** and **Decision Tree** on all graded
+restaurants, then blends their class-probability distributions:
+
+    P_combined(A/B/C) = α·P_KNN + (1−α)·P_DT
+    safety_score      = 3·P(A) + 2·P(B) + 1·P(C)
+
+Because KNN skews to A and DT skews to B/C, the blend is better
+calibrated than either model alone.
+        """
+    )
+
+    _p6_c1, _p6_c2, _p6_c3 = st.columns(3)
+    with _p6_c1:
+        _p6_knn_w = st.slider(
+            "KNN blend weight α",
+            0.0, 1.0, 0.35, 0.05, key="p6_knn_w",
+            help="α = 0: pure Decision Tree  ·  α = 1: pure KNN  ·  default 0.35",
+        )
+    with _p6_c2:
+        _p6_k = st.slider("KNN k", 3, 21, 7, step=2, key="p6_k")
+    with _p6_c3:
+        _p6_dt_depth = st.slider("DT max depth", 4, 20, 12, key="p6_dt_depth")
+
+    _p6_train_btn = st.button(
+        "Train Combined Model",
+        type="primary", key="p6_train_btn",
+    )
+
+    if _p6_train_btn:
+        _rdf_p6 = _load_restaurants()
+        _p6_status = st.status(
+            "Training combined KNN + Decision Tree model…", expanded=True
+        )
+        with _p6_status:
+            st.write(f"α = {_p6_knn_w} (KNN) + {1-_p6_knn_w:.2f} (DT)  ·  "
+                     f"K = {_p6_k}  ·  DT depth = {_p6_dt_depth}")
+
+            _p6_node_counter = st.empty()
+            _p6_nodes_built  = [0]
+
+            def _p6_dt_progress(n: int) -> None:
+                _p6_nodes_built[0] = n
+                _p6_node_counter.caption(f"DT nodes built: {n}")
+
+            _p6_model = CombinedGradePredictor(
+                knn_weight   = _p6_knn_w,
+                k            = _p6_k,
+                dt_max_depth = _p6_dt_depth,
+            )
+            _p6_model.fit(_rdf_p6, dt_progress_callback=_p6_dt_progress)
+            _p6_status.update(label="Models trained — computing safety scores…",
+                              state="running")
+
+            # Pre-compute safety scores for ALL restaurants (cached for RL use)
+            _p6_scores = _p6_model.predict_safety_scores(_rdf_p6)
+            st.write(f"Safety scores computed for **{len(_p6_scores):,}** restaurants.")
+
+            # Sample diagnostics
+            _p6_proba_df = _p6_model.predict_proba_df(_rdf_p6)
+            _p6_status.update(label="Done.", state="complete")
+
+        st.session_state["p6_model"]          = _p6_model
+        st.session_state["p6_safety_scores"]  = _p6_scores
+        st.session_state["p6_proba_df"]       = _p6_proba_df
+        st.session_state["p6_n_train"]        = _p6_model.n_train
+
+    # ── Show model diagnostics if trained ────────────────────────────────
+    _p6_model_ready = "p6_model" in st.session_state
+    if _p6_model_ready:
+        _p6_m  = st.session_state["p6_model"]
+        _p6_sc = st.session_state["p6_safety_scores"]
+        _p6_pd = st.session_state["p6_proba_df"]
+
+        st.success(
+            f"Combined model trained on **{st.session_state['p6_n_train']:,}** "
+            f"graded restaurants  ·  α(KNN)={_p6_m.knn_weight}  ·  "
+            f"α(DT)={_p6_m.dt_weight:.2f}"
+        )
+
+        _d1, _d2, _d3, _d4 = st.columns(4)
+        _mean_sc = float(np.nanmean(_p6_sc))
+        _d1.metric("Mean safety score", f"{_mean_sc:.3f}")
+        _pred_a  = int(np.sum(_p6_pd["combined_pred"] == "A"))
+        _pred_b  = int(np.sum(_p6_pd["combined_pred"] == "B"))
+        _pred_c  = int(np.sum(_p6_pd["combined_pred"] == "C"))
+        _d2.metric("Predicted A", f"{_pred_a:,}")
+        _d3.metric("Predicted B", f"{_pred_b:,}")
+        _d4.metric("Predicted C", f"{_pred_c:,}")
+
+        with st.expander("Combined vs individual model predictions"):
+            _agree_knn = int(np.sum(_p6_pd["combined_pred"] == _p6_pd["knn_pred"]))
+            _agree_dt  = int(np.sum(_p6_pd["combined_pred"] == _p6_pd["dt_pred"]))
+            _agree_both= int(np.sum(
+                (_p6_pd["combined_pred"] == _p6_pd["knn_pred"]) &
+                (_p6_pd["combined_pred"] == _p6_pd["dt_pred"])
+            ))
+            _n_pd = len(_p6_pd)
+
+            _ca, _cb, _cc = st.columns(3)
+            _ca.metric("Combined ≡ KNN", f"{_agree_knn/_n_pd:.1%}")
+            _cb.metric("Combined ≡ DT",  f"{_agree_dt/_n_pd:.1%}")
+            _cc.metric("All three agree", f"{_agree_both/_n_pd:.1%}")
+
+            st.markdown("**Predicted grade distribution comparison**")
+            _dist_rows = []
+            for _src, _col in [("KNN alone","knn_pred"),("DT alone","dt_pred"),
+                                ("Combined","combined_pred")]:
+                for _g in GRADE_CLASSES:
+                    _dist_rows.append({
+                        "Model": _src,
+                        "Grade": _g,
+                        "Count": int(np.sum(_p6_pd[_col] == _g)),
+                    })
+            _dist_df = pd.DataFrame(_dist_rows)
+            _fig_dist = px.bar(
+                _dist_df, x="Grade", y="Count", color="Model", barmode="group",
+                color_discrete_sequence=["#4C8BF5", "#F5844C", "#2ECC71"],
+                title="Grade distribution: KNN vs DT vs Combined",
+                height=320,
+            )
+            _fig_dist.update_layout(margin=dict(t=50, b=20))
+            st.plotly_chart(_fig_dist, use_container_width=True)
+
+            st.markdown("**Decision Tree feature importances**")
+            _fi_dict = _p6_m.dt_feature_importances
+            if _fi_dict:
+                _fi_df = pd.DataFrame(
+                    sorted(_fi_dict.items(), key=lambda x: x[1], reverse=True),
+                    columns=["Feature", "Importance"],
+                )
+                _fig_fi = px.bar(
+                    _fi_df, x="Importance", y="Feature", orientation="h",
+                    color="Importance", color_continuous_scale="Teal",
+                    height=max(280, len(_fi_df) * 28),
+                )
+                _fig_fi.update_layout(
+                    coloraxis_showscale=False,
+                    margin=dict(l=180, t=20, b=10),
+                )
+                st.plotly_chart(_fig_fi, use_container_width=True)
+
+        st.markdown("**Safety score distribution (all restaurants)**")
+        _sc_series = pd.Series(_p6_sc, name="safety_score")
+        _fig_sc = px.histogram(
+            _sc_series.dropna(), nbins=40,
+            title="Predicted safety score distribution (1=C, 2=B, 3=A)",
+            labels={"value": "Safety score", "count": "Restaurants"},
+            color_discrete_sequence=["#4C8BF5"],
+            height=280,
+        )
+        _fig_sc.add_vline(x=1.5, line_dash="dash", line_color=GRADE_COLOR_HEX["C"],
+                          annotation_text="C/B boundary")
+        _fig_sc.add_vline(x=2.5, line_dash="dash", line_color=GRADE_COLOR_HEX["B"],
+                          annotation_text="B/A boundary")
+        _fig_sc.update_layout(margin=dict(t=50, b=20))
+        st.plotly_chart(_fig_sc, use_container_width=True)
+
+    else:
+        st.info(
+            "Configure the blend weights above and click **Train Combined Model** "
+            "to unlock the rest of Part 6."
+        )
+        st.stop()
+
+    # ── 6.2  Location ─────────────────────────────────────────────────────────
+    st.markdown("---")
+    st.subheader("6.2  Your Starting Location")
+    st.markdown(
+        "**Click the map** to set your starting point, or pick a neighbourhood."
+    )
+
+    _nb_names_p6 = list(NYC_NEIGHBORHOODS.keys())
+    _sel_nb_p6   = st.selectbox(
+        "Quick-jump to a neighbourhood",
+        _nb_names_p6, index=0, key="p6_neighborhood",
+    )
+    _def_lat_p6, _def_lng_p6 = NYC_NEIGHBORHOODS[_sel_nb_p6]
+
+    _p6_lat = st.session_state.get("p6_click_lat", _def_lat_p6)
+    _p6_lng = st.session_state.get("p6_click_lng", _def_lng_p6)
+
+    if st.session_state.get("p6_last_nb") != _sel_nb_p6:
+        _p6_lat, _p6_lng = _def_lat_p6, _def_lng_p6
+        st.session_state["p6_click_lat"] = _p6_lat
+        st.session_state["p6_click_lng"] = _p6_lng
+        st.session_state["p6_last_nb"]   = _sel_nb_p6
+
+    _p6_input_map = folium.Map(
+        location=[_p6_lat, _p6_lng],
+        zoom_start=14,
+        tiles="OpenStreetMap",
+        width="100%",
+    )
+    folium.Marker(
+        [_p6_lat, _p6_lng],
+        tooltip="Your location (click map to move)",
+        icon=folium.Icon(color="blue", icon="home", prefix="fa"),
+    ).add_to(_p6_input_map)
+    folium.Rectangle(
+        bounds=[[LAT_MIN, LNG_MIN], [LAT_MAX, LNG_MAX]],
+        color="#4C8BF5", fill=False, weight=1, dash_array="6",
+    ).add_to(_p6_input_map)
+
+    _p6_map_data = st_folium(
+        _p6_input_map, width="100%", height=340, key="p6_input_map",
+        returned_objects=["last_clicked"],
+    )
+    if _p6_map_data and _p6_map_data.get("last_clicked"):
+        _cl = _p6_map_data["last_clicked"]
+        _nl, _nw = round(float(_cl["lat"]), 6), round(float(_cl["lng"]), 6)
+        if LAT_MIN <= _nl <= LAT_MAX and LNG_MIN <= _nw <= LNG_MAX:
+            st.session_state["p6_click_lat"] = _nl
+            st.session_state["p6_click_lng"] = _nw
+            _p6_lat, _p6_lng = _nl, _nw
+        else:
+            st.warning("Click is outside the NYC bounding box.")
+
+    st.caption(
+        f"Starting: **{_p6_lat:.5f}°N, {abs(_p6_lng):.5f}°W** — click map to change"
+    )
+
+    # ── 6.3  Natural Language Query ───────────────────────────────────────────
+    st.markdown("---")
+    st.subheader("6.3  What Are You Looking For?")
+    st.markdown(
+        """
+Enter **any** of the following — the system embeds your text into the
+restaurant matrix and finds the best matches:
+- A dish or food type:  *"spicy ramen"*, *"wood-fired pizza"*, *"dim sum"*
+- A cuisine style:  *"Korean BBQ"*, *"Mediterranean"*
+- A reference restaurant:  *"something like Nobu"*, *"similar to Peter Luger"*
+- Combined:  *"cozy Japanese noodles like Ippudo"*
+        """
+    )
+
+    _p6_query = st.text_input(
+        "Food / dish / restaurant description",
+        key="p6_query",
+        placeholder="e.g. crispy pork bao, wood-fired Neapolitan pizza, find me something like Shake Shack…",
+    )
+
+    if _p6_query.strip():
+        # Quick preview: show detected reference + top cuisine matches
+        _p6_prev_emb = RestaurantEmbedder().fit(_load_restaurants())
+        _p6_ref      = _p6_prev_emb.detected_reference(_p6_query)
+        _p6_prev_top = _p6_prev_emb.top_matches(_p6_query, n=5)
+        if _p6_ref:
+            st.info(
+                f"Restaurant detected in query: **{_p6_ref}** — "
+                "similar restaurants will be prioritised."
+            )
+        if _p6_prev_top:
+            _prev_str = " · ".join(
+                f"**{c}** ({s:.2f})" for c, s in _p6_prev_top[:3]
+            )
+            st.caption(f"Top cuisine matches: {_prev_str}")
+
+    # ── 6.4  Navigation Mode ──────────────────────────────────────────────────
+    st.markdown("---")
+    st.subheader("6.4  Navigation Mode")
+
+    _p6_mode = st.radio(
+        "How do you want to navigate?",
+        ["Area Finder — walk to the best restaurant cluster (RL)",
+         "Direct Route — go straight to a specific restaurant"],
+        index=0, key="p6_mode",
+        help=(
+            "**Area Finder**: Value Iteration plans a walking route to the "
+            "densest cluster of safe, matching restaurants — best when you're "
+            "exploring and happy to choose once you arrive.\n\n"
+            "**Direct Route**: Ranks every nearby restaurant by "
+            "(safety × NLP match × proximity) and routes you straight there. "
+            "Use Next/Previous to browse ranked options."
+        ),
+    )
+    _p6_use_area = _p6_mode.startswith("Area")
+
+    # ── 6.5  Parameters ───────────────────────────────────────────────────────
+    st.markdown("---")
+    st.subheader("6.5  Route Parameters")
+
+    _p6_pk_keys = list(_WALK_PRESETS_P6.keys())
+    _p6_col_walk, _p6_col_opts = st.columns([3, 2])
+
+    with _p6_col_walk:
+        _p6_walk_preset = st.select_slider(
+            "Maximum walking budget",
+            options=_p6_pk_keys,
+            value="15 min (~1.1 km)",
+            key="p6_walk_preset",
+        )
+        _pr6 = _WALK_PRESETS_P6[_p6_walk_preset]
+        st.caption(
+            f"γ = {_pr6['gamma']} · max {_pr6['max_steps']} hops · "
+            f"proximity σ = {_pr6['sigma_km']} km · "
+            f"~{_pr6['walk_km']*1000:.0f} m radius"
+        )
+
+    with _p6_col_opts:
+        _p6_danger   = st.checkbox("Exclude Grade C restaurants", value=True,  key="p6_danger")
+        _p6_osrm     = st.checkbox("Use real street routing (OSRM)", value=True, key="p6_osrm")
+
+    if _p6_use_area:
+        _p6_cui_imp = st.slider(
+            "Cuisine/NLP filter strictness",
+            0, 100, 70, step=10, key="p6_cui_imp",
+            help="0 % = no filter · 100 % = only best-matching type counts",
+        )
+    else:
+        _p6_cui_imp = 0   # not used in direct mode
+
+    # ── 6.6  Find! ───────────────────────────────────────────────────────────
+    st.markdown("---")
+    _p6_run_btn = st.button(
+        "Find Ultimate Route",
+        type="primary", key="p6_run_btn",
+    )
+
+    if _p6_run_btn:
+        _rdf_run = _load_restaurants()
+        _sc_run  = st.session_state["p6_safety_scores"]
+
+        if _p6_use_area:
+            with st.spinner("Running Value Iteration with combined model scores…"):
+                _p6_area_result = find_area_route(
+                    df              = _rdf_run,
+                    safety_scores   = _sc_run,
+                    user_lat        = _p6_lat,
+                    user_lng        = _p6_lng,
+                    query           = _p6_query,
+                    walk_preset_key = _p6_walk_preset,
+                    cuisine_importance = _p6_cui_imp / 100.0,
+                    danger_filter   = _p6_danger,
+                    smooth_sigma    = 1.0,
+                    use_osrm        = _p6_osrm,
+                )
+            st.session_state["p6_area_result"] = _p6_area_result
+            st.session_state["p6_res_lat"]     = _p6_lat
+            st.session_state["p6_res_lng"]     = _p6_lng
+            # Clear any old direct result
+            st.session_state.pop("p6_direct_result", None)
+
+        else:
+            with st.spinner("Ranking restaurants and computing route…"):
+                _ranked, _top_m, _det_ref = rank_restaurants_direct(
+                    df              = _rdf_run,
+                    safety_scores   = _sc_run,
+                    user_lat        = _p6_lat,
+                    user_lng        = _p6_lng,
+                    query           = _p6_query,
+                    walk_preset_key = _p6_walk_preset,
+                    danger_filter   = _p6_danger,
+                    top_n           = 30,
+                )
+            st.session_state["p6_direct_ranked"]  = _ranked
+            st.session_state["p6_direct_top_m"]   = _top_m
+            st.session_state["p6_direct_det_ref"]  = _det_ref
+            st.session_state["p6_direct_idx"]      = 0
+            st.session_state["p6_res_lat"]         = _p6_lat
+            st.session_state["p6_res_lng"]         = _p6_lng
+            # Clear any old area result
+            st.session_state.pop("p6_area_result", None)
+
+    # ── 6.7  Results — Area Mode ──────────────────────────────────────────────
+    _p6_ar: AreaRouteResult | None = st.session_state.get("p6_area_result")
+
+    if _p6_ar is not None:
+        _p6_rl  = st.session_state.get("p6_res_lat", _p6_lat)
+        _p6_rw  = st.session_state.get("p6_res_lng", _p6_lng)
+
+        st.markdown("---")
+        st.subheader("6.7  Area Mode Results")
+
+        # Stats
+        _am1, _am2, _am3, _am4, _am5 = st.columns(5)
+        _am1.metric("Walk distance",    f"{_p6_ar.path_distance_km:.2f} km")
+        _am2.metric("Est. walk time",   f"{_p6_ar.walk_minutes:.0f} min")
+        _am3.metric("Restaurants found", f"{_p6_ar.n_destination_restaurants:,}")
+        _mean_s = _p6_ar.mean_destination_safety
+        _am4.metric(
+            "Avg predicted safety",
+            f"{'A' if _mean_s >= 2.5 else 'B' if _mean_s >= 1.5 else 'C'} ({_mean_s:.2f})",
+            help="Based on combined KNN+DT predicted score (not actual grade)",
+        )
+        _am5.metric(
+            "Route source",
+            "OSRM (real streets)" if _p6_ar.street_route else "Grid approx.",
+        )
+
+        if _p6_ar.detected_ref:
+            st.info(
+                f"Routing toward restaurants similar to **{_p6_ar.detected_ref}** "
+                f"detected in your query."
+            )
+        if _p6_ar.top_matches:
+            _tm_str = " · ".join(
+                f"**{c}** ({s:.2f})" for c, s in _p6_ar.top_matches[:3]
+            )
+            st.caption(f"Cuisine matches: {_tm_str}")
+
+        # Route map
+        st.markdown("#### Walking route to best cluster")
+        _p6_disp = _p6_ar.street_route if _p6_ar.street_route else _p6_ar.grid_route
+        _p6_ctr_lat = (_p6_rl + _p6_ar.destination_lat) / 2
+        _p6_ctr_lng = (_p6_rw + _p6_ar.destination_lng) / 2
+        _p6_span    = max(abs(_p6_rl - _p6_ar.destination_lat),
+                          abs(_p6_rw - _p6_ar.destination_lng) * 0.75, 0.005)
+        _p6_zoom    = max(13, int(14 - _p6_span * 120))
+
+        _p6_rmap = folium.Map(
+            location=[_p6_ctr_lat, _p6_ctr_lng],
+            zoom_start=_p6_zoom,
+            tiles="OpenStreetMap",
+        )
+
+        if len(_p6_disp) >= 2:
+            folium.PolyLine(
+                _p6_disp, color="#FF8C00", weight=5, opacity=0.95,
+                tooltip="Walking route",
+            ).add_to(_p6_rmap)
+
+        folium.Marker(
+            [_p6_rl, _p6_rw],
+            tooltip="Your starting location",
+            icon=folium.Icon(color="blue", icon="home", prefix="fa"),
+        ).add_to(_p6_rmap)
+
+        folium.Marker(
+            [_p6_ar.destination_lat, _p6_ar.destination_lng],
+            tooltip=f"Destination cluster — {_p6_ar.n_destination_restaurants} restaurants",
+            icon=folium.Icon(color="purple", icon="flag", prefix="fa"),
+        ).add_to(_p6_rmap)
+
+        # Destination restaurants
+        _p6_dest_df = _p6_ar.destination_restaurants
+        if not _p6_dest_df.empty:
+            _p6_cluster = MarkerCluster(name="Destination restaurants").add_to(_p6_rmap)
+            _g_icol = {"A": "green", "B": "orange", "C": "red"}
+            for _, _row in _p6_dest_df.dropna(subset=["latitude", "longitude"]).iterrows():
+                _g    = str(_row.get("latest_grade", ""))
+                _sc   = _row.get("safety", 2.0)
+                _addr = " ".join(filter(None, [
+                    str(_row.get("building", "") or ""),
+                    str(_row.get("street", "") or ""),
+                ]))
+                folium.Marker(
+                    location=[float(_row["latitude"]), float(_row["longitude"])],
+                    tooltip=folium.Tooltip(
+                        f"<b>{_row.get('dba','?')}</b><br>"
+                        f"Cuisine: {_row.get('cuisine','—')}<br>"
+                        f"Actual grade: <b>{_g or '—'}</b><br>"
+                        f"Predicted safety: {_sc:.2f}/3.0<br>"
+                        f"{_addr}"
+                    ),
+                    icon=folium.Icon(color=_g_icol.get(_g, "gray"),
+                                     icon="cutlery", prefix="fa"),
+                ).add_to(_p6_cluster)
+
+        # Grade-C warning markers
+        if _p6_danger and not _p6_ar.terrible_restaurants.empty:
+            _p6_terr_fg = folium.FeatureGroup(name="Grade C (filtered)", show=True)
+            for _, _row in _p6_ar.terrible_restaurants.dropna(
+                subset=["latitude", "longitude"]
+            ).iterrows():
+                folium.CircleMarker(
+                    location=[float(_row["latitude"]), float(_row["longitude"])],
+                    radius=5, color="#CC0000", fill=True, fill_opacity=0.6,
+                    tooltip=folium.Tooltip(
+                        f"<b>{_row.get('dba','?')}</b><br>"
+                        f"Grade C — excluded from reward<br>"
+                        f"Score: {_row.get('latest_score','—')}"
+                    ),
+                ).add_to(_p6_terr_fg)
+            _p6_terr_fg.add_to(_p6_rmap)
+
+        folium.LayerControl(collapsed=False).add_to(_p6_rmap)
+        st_folium(_p6_rmap, width="100%", height=600, key="p6_area_map",
+                  returned_objects=[])
+
+        _p6_lcols = st.columns(5)
+        for _lc, (_lbl, _lcl) in zip(_p6_lcols, [
+            ("Start",            "#1E82FF"),
+            ("Destination",      "#9933CC"),
+            ("Walk route",       "#FF8C00"),
+            ("Safe restaurant",  "#228B22"),
+            ("Grade C (nearby)", "#CC0000"),
+        ]):
+            _lc.markdown(
+                f"<span style='display:inline-block;width:12px;height:12px;"
+                f"background:{_lcl};border-radius:50%;margin-right:5px'></span>"
+                f"<small>{_lbl}</small>",
+                unsafe_allow_html=True,
+            )
+
+        # Cuisine match breakdown
+        if _p6_ar.top_matches:
+            st.markdown("---")
+            st.subheader("6.8  NLP Embedding Match Breakdown")
+            st.caption(
+                "TF-IDF cosine similarity between your query and restaurant "
+                f"corpus (name + cuisine + borough).  Query: *\"{_p6_query}\"*"
+            )
+            _p6_tm_df = pd.DataFrame(_p6_ar.top_matches, columns=["Cuisine", "Match Score"])
+            _p6_fig_tm = px.bar(
+                _p6_tm_df, x="Match Score", y="Cuisine", orientation="h",
+                color="Match Score", color_continuous_scale="Teal",
+                title="Top-5 cuisine matches for your query",
+                height=260,
+            )
+            _p6_fig_tm.update_layout(
+                coloraxis_showscale=False, yaxis_title="",
+                margin=dict(l=160, t=50, b=10),
+                xaxis=dict(range=[0, 1.05]),
+            )
+            st.plotly_chart(_p6_fig_tm, use_container_width=True)
+
+        # RL value-function heatmap
+        st.markdown("---")
+        st.subheader("6.9  RL Value Function — Combined-Score Heatmap")
+        st.markdown(
+            "Reward grid built from **combined model safety scores × NLP match scores**. "
+            "Brighter = higher discounted return.  The route traces the gradient "
+            "from your location toward the peak."
+        )
+
+        _p6_V  = _p6_ar.value_map
+        _p6_Vn = (_p6_V - _p6_V.min()) / (_p6_V.max() - _p6_V.min() + 1e-8)
+        _p6_hm: list = []
+        for _ri in range(0, GRID_ROWS, 2):
+            for _ci in range(0, GRID_COLS, 2):
+                _v = float(_p6_Vn[_ri, _ci])
+                if _v > 0.08:
+                    _hl, _hw = cell_to_latlng(_ri, _ci)
+                    _p6_hm.append([_hl, _hw, _v])
+
+        _p6_vmap = folium.Map(
+            location=[40.710, -73.985], zoom_start=11,
+            tiles="CartoDB dark_matter",
+        )
+        HeatMap(
+            _p6_hm, min_opacity=0.25, radius=16, blur=12,
+            gradient={0.2: "#0000ff", 0.5: "#00ffff",
+                      0.75: "#ffff00", 1.0: "#ff0000"},
+        ).add_to(_p6_vmap)
+        if len(_p6_disp) >= 2:
+            folium.PolyLine(_p6_disp, color="#FFFF00", weight=4,
+                            opacity=0.9).add_to(_p6_vmap)
+        folium.CircleMarker([_p6_rl, _p6_rw], radius=8,
+                             color="#1E82FF", fill=True,
+                             tooltip="Start").add_to(_p6_vmap)
+        folium.CircleMarker(
+            [_p6_ar.destination_lat, _p6_ar.destination_lng], radius=8,
+            color="#CC44FF", fill=True, tooltip="Destination cluster",
+        ).add_to(_p6_vmap)
+        st_folium(_p6_vmap, width="100%", height=460, key="p6_vmap",
+                  returned_objects=[])
+
+        # Destination table
+        st.markdown("---")
+        st.subheader("6.10  Recommended Restaurants at Destination")
+        if not _p6_dest_df.empty:
+            _p6_show = [c for c in ["dba","cuisine","latest_grade","latest_score",
+                                     "safety","boro","building","street"]
+                        if c in _p6_dest_df.columns]
+            _p6_disp_df = _p6_dest_df[_p6_show].copy()
+            if "safety" in _p6_disp_df.columns:
+                _p6_disp_df = _p6_disp_df.sort_values("safety", ascending=False)
+            st.dataframe(_p6_disp_df.head(20).reset_index(drop=True),
+                         use_container_width=True, height=360)
+
+        # Terrible restaurants warning
+        if _p6_danger and not _p6_ar.terrible_restaurants.empty:
+            st.markdown("---")
+            st.subheader("6.11  Grade C Restaurants Near Your Route")
+            st.warning(
+                f"**{len(_p6_ar.terrible_restaurants)}** Grade-C restaurants are "
+                "within ~2 km of your route.  Their actual grade is C, so even if "
+                "the combined model's predicted safety is higher, they were zeroed "
+                "out of the RL reward."
+            )
+            _p6_tc = [c for c in ["dba","cuisine","latest_grade","latest_score",
+                                    "boro","building","street"]
+                      if c in _p6_ar.terrible_restaurants.columns]
+            st.dataframe(
+                _p6_ar.terrible_restaurants[_p6_tc]
+                .sort_values("latest_score", ascending=False)
+                .reset_index(drop=True),
+                use_container_width=True, height=260,
+            )
+
+    # ── 6.7b  Results — Direct Mode ───────────────────────────────────────────
+    _p6_ranked: pd.DataFrame | None = st.session_state.get("p6_direct_ranked")
+
+    if _p6_ranked is not None and not _p6_use_area:
+        _p6_rl  = st.session_state.get("p6_res_lat", _p6_lat)
+        _p6_rw  = st.session_state.get("p6_res_lng", _p6_lng)
+        _p6_dtm = st.session_state.get("p6_direct_top_m", [])
+        _p6_drf = st.session_state.get("p6_direct_det_ref")
+        _p6_idx = st.session_state.get("p6_direct_idx", 0)
+
+        st.markdown("---")
+        st.subheader("6.7  Direct Route Results")
+
+        if _p6_ranked.empty:
+            st.warning(
+                "No restaurants found within the walking budget matching your query. "
+                "Try increasing the walk budget or relaxing the query."
+            )
+        else:
+            # Navigation controls
+            _n_cands = len(_p6_ranked)
+            _p6_idx  = max(0, min(_p6_idx, _n_cands - 1))
+
+            if _p6_drf:
+                st.info(
+                    f"Routing to restaurants similar to **{_p6_drf}** detected in query."
+                )
+            if _p6_dtm:
+                _dtm_str = " · ".join(f"**{c}** ({s:.2f})" for c, s in _p6_dtm[:3])
+                st.caption(f"Cuisine matches: {_dtm_str}")
+
+            st.markdown(
+                f"**{_n_cands}** restaurants ranked by "
+                "(combined safety score × NLP match × proximity).  "
+                f"Showing **#{_p6_idx + 1}** of {_n_cands}."
+            )
+
+            _nav_c1, _nav_c2, _nav_c3 = st.columns([1, 1, 4])
+            with _nav_c1:
+                if st.button("← Previous", key="p6_prev_btn",
+                             disabled=(_p6_idx == 0)):
+                    st.session_state["p6_direct_idx"] = _p6_idx - 1
+                    st.rerun()
+            with _nav_c2:
+                if st.button("Next →", key="p6_next_btn",
+                             disabled=(_p6_idx >= _n_cands - 1)):
+                    st.session_state["p6_direct_idx"] = _p6_idx + 1
+                    st.rerun()
+            with _nav_c3:
+                _new_idx = st.number_input(
+                    "Jump to restaurant #", min_value=1, max_value=_n_cands,
+                    value=_p6_idx + 1, step=1, key="p6_idx_input",
+                )
+                if _new_idx - 1 != _p6_idx:
+                    st.session_state["p6_direct_idx"] = int(_new_idx) - 1
+                    st.rerun()
+
+            # Current restaurant info card
+            _curr = _p6_ranked.iloc[_p6_idx]
+            _curr_grade  = str(_curr.get("latest_grade", "—") or "—")
+            _curr_safety = float(_curr.get("safety", 2.0))
+            _curr_nlp    = float(_curr.get("nlp_score", 1.0))
+            _curr_comb   = float(_curr.get("combined_score", 0.0))
+            _curr_addr   = " ".join(filter(None, [
+                str(_curr.get("building", "") or ""),
+                str(_curr.get("street", "") or ""),
+            ]))
+            _curr_lat    = float(_curr["latitude"])
+            _curr_lng    = float(_curr["longitude"])
+
+            st.markdown("---")
+            _info_c1, _info_c2, _info_c3, _info_c4 = st.columns(4)
+            _info_c1.markdown(
+                f"<div style='background:#1a2744;border-radius:8px;padding:12px'>"
+                f"<div style='font-size:0.75rem;color:#aaa'>Restaurant</div>"
+                f"<div style='font-size:1.1rem;font-weight:bold'>{_curr.get('dba','?')}</div>"
+                f"<div style='color:#ccc;font-size:0.85rem'>{_curr.get('cuisine','—')}</div>"
+                f"<div style='color:#aaa;font-size:0.8rem;margin-top:4px'>{_curr_addr}</div>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+            _info_c2.metric(
+                "Actual grade / score",
+                f"{_curr_grade} / {_curr.get('latest_score', '—')}",
+            )
+            _info_c3.metric(
+                "Predicted safety",
+                f"{_curr_safety:.2f} / 3.0",
+                help="Combined KNN+DT blended safety score",
+            )
+            _info_c4.metric(
+                "NLP match × rank",
+                f"{_curr_nlp:.2f}  (#{_p6_idx+1})",
+                help="TF-IDF cosine similarity of your query to this restaurant",
+            )
+
+            # Compute route to current restaurant
+            _curr_sr, _curr_gr, _curr_dist, _curr_walk = \
+                get_direct_route_to_restaurant(
+                    _p6_rl, _p6_rw, _curr_lat, _curr_lng,
+                    use_osrm=_p6_osrm,
+                )
+
+            _rm1, _rm2, _rm3 = st.columns(3)
+            _rm1.metric("Walk distance", f"{_curr_dist:.2f} km")
+            _rm2.metric("Est. walk time", f"{_curr_walk:.0f} min")
+            _rm3.metric("Route source",
+                        "OSRM (real streets)" if _curr_sr else "Grid approx.")
+
+            # Direct route map
+            st.markdown("#### Route to this restaurant")
+            _disp_r = _curr_sr if _curr_sr else _curr_gr
+
+            _p6_dmap = folium.Map(
+                location=[
+                    (_p6_rl + _curr_lat) / 2,
+                    (_p6_rw + _curr_lng) / 2,
+                ],
+                zoom_start=max(13, int(14 - max(
+                    abs(_p6_rl - _curr_lat),
+                    abs(_p6_rw - _curr_lng) * 0.75,
+                    0.005,
+                ) * 120)),
+                tiles="OpenStreetMap",
+            )
+
+            if len(_disp_r) >= 2:
+                folium.PolyLine(
+                    _disp_r, color="#FF8C00", weight=5,
+                    opacity=0.95, tooltip="Walking route",
+                ).add_to(_p6_dmap)
+
+            folium.Marker(
+                [_p6_rl, _p6_rw],
+                tooltip="Your starting location",
+                icon=folium.Icon(color="blue", icon="home", prefix="fa"),
+            ).add_to(_p6_dmap)
+
+            _dest_icon_col = {"A": "green", "B": "orange", "C": "red"}.get(
+                _curr_grade, "gray"
+            )
+            folium.Marker(
+                [_curr_lat, _curr_lng],
+                tooltip=folium.Tooltip(
+                    f"<b>{_curr.get('dba','?')}</b><br>"
+                    f"Cuisine: {_curr.get('cuisine','—')}<br>"
+                    f"Grade: <b>{_curr_grade}</b>  "
+                    f"Predicted safety: {_curr_safety:.2f}/3<br>"
+                    f"NLP match: {_curr_nlp:.2f}  Rank: #{_p6_idx+1}<br>"
+                    f"{_curr_addr}"
+                ),
+                icon=folium.Icon(color=_dest_icon_col, icon="cutlery", prefix="fa"),
+            ).add_to(_p6_dmap)
+
+            # Show other candidates as small circles
+            _others = _p6_ranked.drop(_p6_ranked.index[_p6_idx]).dropna(
+                subset=["latitude", "longitude"]
+            ).head(15)
+            _other_grp = folium.FeatureGroup(name="Other candidates", show=True)
+            for _, _orow in _others.iterrows():
+                _og = str(_orow.get("latest_grade", "") or "")
+                _oc = {"A": "#228B22", "B": "#FFA500", "C": "#CC0000"}.get(_og, "#888")
+                folium.CircleMarker(
+                    location=[float(_orow["latitude"]), float(_orow["longitude"])],
+                    radius=5, color=_oc, fill=True, fill_opacity=0.55,
+                    tooltip=folium.Tooltip(
+                        f"{_orow.get('dba','?')} | "
+                        f"Grade {_og} | "
+                        f"Safety {_orow.get('safety',0):.2f}"
+                    ),
+                ).add_to(_other_grp)
+            _other_grp.add_to(_p6_dmap)
+
+            folium.LayerControl(collapsed=False).add_to(_p6_dmap)
+            st_folium(_p6_dmap, width="100%", height=560, key="p6_direct_map",
+                      returned_objects=[])
+
+            _p6_dlcols = st.columns(5)
+            for _lc, (_lbl, _lcl) in zip(_p6_dlcols, [
+                ("Start",            "#1E82FF"),
+                ("Selected restaurant","#228B22"),
+                ("Walk route",       "#FF8C00"),
+                ("Other candidates", "#888888"),
+                ("Grade A / B / C",  "#2ECC71"),
+            ]):
+                _lc.markdown(
+                    f"<span style='display:inline-block;width:12px;height:12px;"
+                    f"background:{_lcl};border-radius:50%;margin-right:5px'></span>"
+                    f"<small>{_lbl}</small>",
+                    unsafe_allow_html=True,
+                )
+
+            # Full ranked table
+            st.markdown("---")
+            st.subheader(f"6.8  All {_n_cands} Ranked Candidates")
+            _p6_show_cols = [
+                c for c in ["dba", "cuisine", "latest_grade", "latest_score",
+                             "safety", "nlp_score", "combined_score",
+                             "boro", "building", "street"]
+                if c in _p6_ranked.columns
+            ]
+            _p6_tbl = _p6_ranked[_p6_show_cols].copy()
+            if "safety" in _p6_tbl.columns:
+                _p6_tbl["safety"] = _p6_tbl["safety"].round(3)
+            if "nlp_score" in _p6_tbl.columns:
+                _p6_tbl["nlp_score"] = _p6_tbl["nlp_score"].round(3)
+            if "combined_score" in _p6_tbl.columns:
+                _p6_tbl["combined_score"] = _p6_tbl["combined_score"].round(4)
+            st.dataframe(_p6_tbl.reset_index(drop=True),
+                         use_container_width=True, height=480)
+
+    elif _p6_ranked is None and not _p6_use_area and "p6_run_btn" not in st.session_state:
+        pass   # nothing shown before first run
+
+    # Prompt if nothing run yet
+    if _p6_ar is None and _p6_ranked is None:
+        st.info(
+            "Set your location and food preference above, then click "
+            "**Find Ultimate Route** to see results."
+        )

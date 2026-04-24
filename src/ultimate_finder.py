@@ -451,7 +451,7 @@ def find_area_route(
     # ── OSRM real routing ───────────────────────────────────────────────
     street_route: Optional[list[tuple[float, float]]] = None
     if use_osrm:
-        street_route = get_osrm_route(user_lat, user_lng, dest_lat, dest_lng, mode="walking")
+        street_route = get_osrm_route(user_lat, user_lng, dest_lat, dest_lng, mode="foot")
 
     # ── Destination restaurants ─────────────────────────────────────────
     if "grid_row" in safe_df.columns and "grid_col" in safe_df.columns:
@@ -608,7 +608,7 @@ def get_direct_route_to_restaurant(
     """
     street_route: Optional[list[tuple[float, float]]] = None
     if use_osrm:
-        street_route = get_osrm_route(user_lat, user_lng, dest_lat, dest_lng, mode="walking")
+        street_route = get_osrm_route(user_lat, user_lng, dest_lat, dest_lng, mode="foot")
 
     # Rectilinear grid fallback
     latlng_pair = [(user_lat, user_lng), (dest_lat, dest_lng)]

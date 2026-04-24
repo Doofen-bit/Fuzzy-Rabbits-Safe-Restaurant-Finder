@@ -4,7 +4,13 @@
       "Bash(python:*)",
       "WebFetch(domain:data.cityofnewyork.us)",
       "Bash(pip install:*)",
-      "Bash(python3 -c \" import sys, json lines = sys.stdin.read\\(\\).strip\\(\\).split\\('\\\\n'\\) for line in lines[-10:]: try: obj = json.loads\\(line\\) role = obj.get\\('role', ''\\) content = obj.get\\('content', ''\\) if isinstance\\(content, list\\): for c in content: if isinstance\\(c, dict\\) and c.get\\('type'\\) == 'text': print\\(f'[{role}] {c[\\\\\"text\\\\\"][:500]}'\\) elif isinstance\\(content, str\\): print\\(f'[{role}] {content[:500]}'\\) except: pass \")"
+      "Bash(python3 -c \" import sys, json lines = sys.stdin.read\\(\\).strip\\(\\).split\\('\\\\n'\\) for line in lines[-10:]: try: obj = json.loads\\(line\\) role = obj.get\\('role', ''\\) content = obj.get\\('content', ''\\) if isinstance\\(content, list\\): for c in content: if isinstance\\(c, dict\\) and c.get\\('type'\\) == 'text': print\\(f'[{role}] {c[\\\\\"text\\\\\"][:500]}'\\) elif isinstance\\(content, str\\): print\\(f'[{role}] {content[:500]}'\\) except: pass \")",
+      "Bash(curl -s --max-time 8 \"https://routing.openstreetmap.de/routed-foot/route/v1/foot/-73.985130,40.758896;-73.975130,40.748896?overview=full&geometries=geojson&steps=false\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(d.get\\('code'\\), len\\(d.get\\('routes',[]\\)\\), 'routes'\\)\")",
+      "Bash(curl -v --max-time 8 \"https://routing.openstreetmap.de/routed-foot/route/v1/foot/-73.985130,40.758896;-73.975130,40.748896?overview=full&geometries=geojson&steps=false\")",
+      "Bash(curl -s --max-time 8 \"http://router.project-osrm.org/route/v1/foot/-73.985130,40.758896;-73.975130,40.748896?overview=full&geometries=geojson&steps=false\")",
+      "Bash(curl -s --max-time 8 \"http://router.project-osrm.org/route/v1/driving/-73.985130,40.758896;-73.975130,40.748896?overview=full&geometries=geojson&steps=false\")",
+      "Bash(curl -s --max-time 5 \"http://router.project-osrm.org/route/v1/walking/-73.985130,40.758896;-73.975130,40.748896?overview=full&geometries=geojson&steps=false\")"
     ]
   }
 }

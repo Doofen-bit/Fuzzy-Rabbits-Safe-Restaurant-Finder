@@ -1918,6 +1918,18 @@ from src.ultimate_finder import (
 )
 from src.rl_route_finder import WALK_PRESETS as _WALK_PRESETS_P6
 
+
+@st.cache_resource(show_spinner=False)
+def _load_combined_model():
+    """Train the combined KNN+DT model once with pre-tuned best parameters."""
+    rdf      = _load_restaurants()
+    model    = CombinedGradePredictor(knn_weight=0.35, k=7, dt_max_depth=12)
+    model.fit(rdf)
+    scores   = model.predict_safety_scores(rdf)
+    proba_df = model.predict_proba_df(rdf)
+    return model, scores, proba_df, model.n_train
+
+
 with tab6:
     st.header("Part 6: Ultimate Restaurant Finder")
     st.markdown(
@@ -1932,174 +1944,119 @@ Everything from Parts 1–5 combined into one powerful finder.
         """
     )
 
-    # ── 6.1  Train the Combined Model ───────────────────────────────────────
+    # ── 6.1  Combined Grade Predictor (auto-loads with best parameters) ─────
     st.markdown("---")
-    st.subheader("6.1  Train the Combined Grade Predictor")
+    st.subheader("6.1  Combined Grade Predictor")
     st.markdown(
         """
-The combined model trains **KNN** and **Decision Tree** on all graded
-restaurants, then blends their class-probability distributions:
+The combined model blends **KNN** and **Decision Tree** grade predictions into a
+continuous safety score (1–3) used as the RL reward signal — no configuration needed.
 
-    P_combined(A/B/C) = α·P_KNN + (1−α)·P_DT
-    safety_score      = 3·P(A) + 2·P(B) + 1·P(C)
+The best parameters were determined by cross-validated tuning and are applied automatically:
 
-Because KNN skews to A and DT skews to B/C, the blend is better
-calibrated than either model alone.
+| Parameter | Best value | What it controls |
+|---|---|---|
+| KNN blend weight α | **0.35** | KNN contributes 35%, Decision Tree 65% — balances KNN's A-bias with DT's minority-class recovery |
+| KNN k | **7** | Neighbours considered per prediction |
+| DT max depth | **12** | Tree complexity — enough to capture patterns without overfitting |
         """
     )
 
-    _p6_c1, _p6_c2, _p6_c3 = st.columns(3)
-    with _p6_c1:
-        _p6_knn_w = st.slider(
-            "KNN blend weight α",
-            0.0, 1.0, 0.35, 0.05, key="p6_knn_w",
-            help="α = 0: pure Decision Tree  ·  α = 1: pure KNN  ·  default 0.35",
-        )
-    with _p6_c2:
-        _p6_k = st.slider("KNN k", 3, 21, 7, step=2, key="p6_k")
-    with _p6_c3:
-        _p6_dt_depth = st.slider("DT max depth", 4, 20, 12, key="p6_dt_depth")
+    with st.spinner("Loading combined KNN + Decision Tree model… (first visit only, cached afterwards)"):
+        _p6_model, _p6_scores, _p6_proba_df, _p6_n_train = _load_combined_model()
 
-    _p6_train_btn = st.button(
-        "Train Combined Model",
-        type="primary", key="p6_train_btn",
+    _p6_m  = _p6_model
+    _p6_sc = _p6_scores
+    _p6_pd = _p6_proba_df
+
+    st.success(
+        f"Combined model ready — trained on **{_p6_n_train:,}** graded restaurants  "
+        f"·  KNN weight α = {_p6_m.knn_weight}  ·  DT weight = {_p6_m.dt_weight:.2f}"
     )
 
-    if _p6_train_btn:
-        _rdf_p6 = _load_restaurants()
-        _p6_status = st.status(
-            "Training combined KNN + Decision Tree model…", expanded=True
+    _d1, _d2, _d3, _d4 = st.columns(4)
+    _mean_sc = float(np.nanmean(_p6_sc))
+    _d1.metric("Mean safety score", f"{_mean_sc:.3f}")
+    _pred_a  = int(np.sum(_p6_pd["combined_pred"] == "A"))
+    _pred_b  = int(np.sum(_p6_pd["combined_pred"] == "B"))
+    _pred_c  = int(np.sum(_p6_pd["combined_pred"] == "C"))
+    _d2.metric("Predicted A", f"{_pred_a:,}")
+    _d3.metric("Predicted B", f"{_pred_b:,}")
+    _d4.metric("Predicted C", f"{_pred_c:,}")
+
+    with st.expander("How does blending KNN and Decision Tree help? (click to expand)"):
+        _agree_knn = int(np.sum(_p6_pd["combined_pred"] == _p6_pd["knn_pred"]))
+        _agree_dt  = int(np.sum(_p6_pd["combined_pred"] == _p6_pd["dt_pred"]))
+        _agree_both= int(np.sum(
+            (_p6_pd["combined_pred"] == _p6_pd["knn_pred"]) &
+            (_p6_pd["combined_pred"] == _p6_pd["dt_pred"])
+        ))
+        _n_pd = len(_p6_pd)
+
+        st.markdown(
+            "KNN alone skews almost everything to grade A (the majority class). "
+            "Decision Tree recovers B and C predictions better. "
+            "Blending the two gives a more balanced, calibrated result."
         )
-        with _p6_status:
-            st.write(f"α = {_p6_knn_w} (KNN) + {1-_p6_knn_w:.2f} (DT)  ·  "
-                     f"K = {_p6_k}  ·  DT depth = {_p6_dt_depth}")
 
-            _p6_node_counter = st.empty()
-            _p6_nodes_built  = [0]
+        _ca, _cb, _cc = st.columns(3)
+        _ca.metric("Combined agrees with KNN", f"{_agree_knn/_n_pd:.1%}")
+        _cb.metric("Combined agrees with DT",  f"{_agree_dt/_n_pd:.1%}")
+        _cc.metric("All three agree",           f"{_agree_both/_n_pd:.1%}")
 
-            def _p6_dt_progress(n: int) -> None:
-                _p6_nodes_built[0] = n
-                _p6_node_counter.caption(f"DT nodes built: {n}")
+        st.markdown("**Predicted grade distribution — KNN vs DT vs Combined**")
+        _dist_rows = []
+        for _src, _col in [("KNN alone","knn_pred"),("DT alone","dt_pred"),
+                            ("Combined","combined_pred")]:
+            for _g in GRADE_CLASSES:
+                _dist_rows.append({
+                    "Model": _src,
+                    "Grade": _g,
+                    "Count": int(np.sum(_p6_pd[_col] == _g)),
+                })
+        _dist_df = pd.DataFrame(_dist_rows)
+        _fig_dist = px.bar(
+            _dist_df, x="Grade", y="Count", color="Model", barmode="group",
+            color_discrete_sequence=["#4C8BF5", "#F5844C", "#2ECC71"],
+            title="Grade distribution: KNN vs DT vs Combined",
+            height=320,
+        )
+        _fig_dist.update_layout(margin=dict(t=50, b=20))
+        st.plotly_chart(_fig_dist, use_container_width=True)
 
-            _p6_model = CombinedGradePredictor(
-                knn_weight   = _p6_knn_w,
-                k            = _p6_k,
-                dt_max_depth = _p6_dt_depth,
+        st.markdown("**Decision Tree feature importances**")
+        _fi_dict = _p6_m.dt_feature_importances
+        if _fi_dict:
+            _fi_df = pd.DataFrame(
+                sorted(_fi_dict.items(), key=lambda x: x[1], reverse=True),
+                columns=["Feature", "Importance"],
             )
-            _p6_model.fit(_rdf_p6, dt_progress_callback=_p6_dt_progress)
-            _p6_status.update(label="Models trained — computing safety scores…",
-                              state="running")
-
-            # Pre-compute safety scores for ALL restaurants (cached for RL use)
-            _p6_scores = _p6_model.predict_safety_scores(_rdf_p6)
-            st.write(f"Safety scores computed for **{len(_p6_scores):,}** restaurants.")
-
-            # Sample diagnostics
-            _p6_proba_df = _p6_model.predict_proba_df(_rdf_p6)
-            _p6_status.update(label="Done.", state="complete")
-
-        st.session_state["p6_model"]          = _p6_model
-        st.session_state["p6_safety_scores"]  = _p6_scores
-        st.session_state["p6_proba_df"]       = _p6_proba_df
-        st.session_state["p6_n_train"]        = _p6_model.n_train
-
-    # ── Show model diagnostics if trained ────────────────────────────────
-    _p6_model_ready = "p6_model" in st.session_state
-    if _p6_model_ready:
-        _p6_m  = st.session_state["p6_model"]
-        _p6_sc = st.session_state["p6_safety_scores"]
-        _p6_pd = st.session_state["p6_proba_df"]
-
-        st.success(
-            f"Combined model trained on **{st.session_state['p6_n_train']:,}** "
-            f"graded restaurants  ·  α(KNN)={_p6_m.knn_weight}  ·  "
-            f"α(DT)={_p6_m.dt_weight:.2f}"
-        )
-
-        _d1, _d2, _d3, _d4 = st.columns(4)
-        _mean_sc = float(np.nanmean(_p6_sc))
-        _d1.metric("Mean safety score", f"{_mean_sc:.3f}")
-        _pred_a  = int(np.sum(_p6_pd["combined_pred"] == "A"))
-        _pred_b  = int(np.sum(_p6_pd["combined_pred"] == "B"))
-        _pred_c  = int(np.sum(_p6_pd["combined_pred"] == "C"))
-        _d2.metric("Predicted A", f"{_pred_a:,}")
-        _d3.metric("Predicted B", f"{_pred_b:,}")
-        _d4.metric("Predicted C", f"{_pred_c:,}")
-
-        with st.expander("Combined vs individual model predictions"):
-            _agree_knn = int(np.sum(_p6_pd["combined_pred"] == _p6_pd["knn_pred"]))
-            _agree_dt  = int(np.sum(_p6_pd["combined_pred"] == _p6_pd["dt_pred"]))
-            _agree_both= int(np.sum(
-                (_p6_pd["combined_pred"] == _p6_pd["knn_pred"]) &
-                (_p6_pd["combined_pred"] == _p6_pd["dt_pred"])
-            ))
-            _n_pd = len(_p6_pd)
-
-            _ca, _cb, _cc = st.columns(3)
-            _ca.metric("Combined ≡ KNN", f"{_agree_knn/_n_pd:.1%}")
-            _cb.metric("Combined ≡ DT",  f"{_agree_dt/_n_pd:.1%}")
-            _cc.metric("All three agree", f"{_agree_both/_n_pd:.1%}")
-
-            st.markdown("**Predicted grade distribution comparison**")
-            _dist_rows = []
-            for _src, _col in [("KNN alone","knn_pred"),("DT alone","dt_pred"),
-                                ("Combined","combined_pred")]:
-                for _g in GRADE_CLASSES:
-                    _dist_rows.append({
-                        "Model": _src,
-                        "Grade": _g,
-                        "Count": int(np.sum(_p6_pd[_col] == _g)),
-                    })
-            _dist_df = pd.DataFrame(_dist_rows)
-            _fig_dist = px.bar(
-                _dist_df, x="Grade", y="Count", color="Model", barmode="group",
-                color_discrete_sequence=["#4C8BF5", "#F5844C", "#2ECC71"],
-                title="Grade distribution: KNN vs DT vs Combined",
-                height=320,
+            _fig_fi = px.bar(
+                _fi_df, x="Importance", y="Feature", orientation="h",
+                color="Importance", color_continuous_scale="Teal",
+                height=max(280, len(_fi_df) * 28),
             )
-            _fig_dist.update_layout(margin=dict(t=50, b=20))
-            st.plotly_chart(_fig_dist, use_container_width=True)
+            _fig_fi.update_layout(
+                coloraxis_showscale=False,
+                margin=dict(l=180, t=20, b=10),
+            )
+            st.plotly_chart(_fig_fi, use_container_width=True)
 
-            st.markdown("**Decision Tree feature importances**")
-            _fi_dict = _p6_m.dt_feature_importances
-            if _fi_dict:
-                _fi_df = pd.DataFrame(
-                    sorted(_fi_dict.items(), key=lambda x: x[1], reverse=True),
-                    columns=["Feature", "Importance"],
-                )
-                _fig_fi = px.bar(
-                    _fi_df, x="Importance", y="Feature", orientation="h",
-                    color="Importance", color_continuous_scale="Teal",
-                    height=max(280, len(_fi_df) * 28),
-                )
-                _fig_fi.update_layout(
-                    coloraxis_showscale=False,
-                    margin=dict(l=180, t=20, b=10),
-                )
-                st.plotly_chart(_fig_fi, use_container_width=True)
-
-        st.markdown("**Safety score distribution (all restaurants)**")
-        _sc_series = pd.Series(_p6_sc, name="safety_score")
-        _fig_sc = px.histogram(
-            _sc_series.dropna(), nbins=40,
-            title="Predicted safety score distribution (1=C, 2=B, 3=A)",
-            labels={"value": "Safety score", "count": "Restaurants"},
-            color_discrete_sequence=["#4C8BF5"],
-            height=280,
-        )
-        _fig_sc.add_vline(x=1.5, line_dash="dash", line_color=GRADE_COLOR_HEX["C"],
-                          annotation_text="C/B boundary")
-        _fig_sc.add_vline(x=2.5, line_dash="dash", line_color=GRADE_COLOR_HEX["B"],
-                          annotation_text="B/A boundary")
-        _fig_sc.update_layout(margin=dict(t=50, b=20))
-        st.plotly_chart(_fig_sc, use_container_width=True)
-
-    else:
-        st.info(
-            "Configure the blend weights above and click **Train Combined Model** "
-            "to unlock the rest of Part 6."
-        )
-        st.stop()
+    st.markdown("**Safety score distribution (all restaurants)**")
+    _sc_series = pd.Series(_p6_sc, name="safety_score")
+    _fig_sc = px.histogram(
+        _sc_series.dropna(), nbins=40,
+        title="Predicted safety score distribution (1=C · 2=B · 3=A)",
+        labels={"value": "Safety score", "count": "Restaurants"},
+        color_discrete_sequence=["#4C8BF5"],
+        height=280,
+    )
+    _fig_sc.add_vline(x=1.5, line_dash="dash", line_color=GRADE_COLOR_HEX["C"],
+                      annotation_text="C/B boundary")
+    _fig_sc.add_vline(x=2.5, line_dash="dash", line_color=GRADE_COLOR_HEX["B"],
+                      annotation_text="B/A boundary")
+    _fig_sc.update_layout(margin=dict(t=50, b=20))
+    st.plotly_chart(_fig_sc, use_container_width=True)
 
     # ── 6.2  Location ─────────────────────────────────────────────────────────
     st.markdown("---")
@@ -2257,7 +2214,7 @@ restaurant matrix and finds the best matches:
 
     if _p6_run_btn:
         _rdf_run = _load_restaurants()
-        _sc_run  = st.session_state["p6_safety_scores"]
+        _sc_run  = _p6_scores
 
         if _p6_use_area:
             with st.spinner("Running Value Iteration with combined model scores…"):

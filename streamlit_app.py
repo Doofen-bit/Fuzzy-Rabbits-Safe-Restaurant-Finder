@@ -96,10 +96,14 @@ from src.rl_route_finder import (
 # ---------------------------------------------------------------------------
 # Page config
 # ---------------------------------------------------------------------------
+if "demo_mode" not in st.session_state:
+    st.session_state["demo_mode"] = False
+_demo_active = bool(st.session_state["demo_mode"])
+
 st.set_page_config(
     page_title="NYC Safe Restaurant Finder",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed" if _demo_active else "expanded",
 )
 
 # ---------------------------------------------------------------------------
@@ -159,24 +163,24 @@ def _add_map_color(df: pd.DataFrame) -> pd.DataFrame:
 # SIDEBAR — shared filters for Data Explorer & Map
 # ===========================================================================
 def _sidebar_filters(restaurants: pd.DataFrame) -> pd.DataFrame:
-    st.sidebar.header("Filters  (Part 1)")
+    with st.expander("Filters", expanded=True):
+        c1, c2 = st.columns(2)
+        with c1:
+            boros = sorted(b for b in restaurants["boro"].dropna().unique() if b != "0")
+            sel_boros = st.multiselect("Borough", boros, default=boros)
+            all_grades = ["A", "B", "C", "N", "Z", "—No grade—"]
+            sel_grades = st.multiselect("Latest grade", all_grades, default=["A", "B", "C"])
+        with c2:
+            top_cuisines = restaurants["cuisine"].value_counts().head(20).index.tolist()
+            sel_cuisines = st.multiselect("Cuisine (top 20)", top_cuisines, default=[])
+            cuisine_text = st.text_input("Or search cuisine", "")
 
-    boros = sorted(b for b in restaurants["boro"].dropna().unique() if b != "0")
-    sel_boros = st.sidebar.multiselect("Borough", boros, default=boros)
-
-    all_grades = ["A", "B", "C", "N", "Z", "—No grade—"]
-    sel_grades = st.sidebar.multiselect("Latest grade", all_grades, default=["A", "B", "C"])
-
-    top_cuisines = restaurants["cuisine"].value_counts().head(20).index.tolist()
-    sel_cuisines = st.sidebar.multiselect("Cuisine (top 20)", top_cuisines, default=[])
-    cuisine_text = st.sidebar.text_input("Or search cuisine", "")
-
-    score_min = int(restaurants["latest_score"].dropna().min())
-    score_max = int(restaurants["latest_score"].dropna().max())
-    sel_score = st.sidebar.slider(
-        "Latest score range (lower = better)",
-        score_min, score_max, (score_min, min(score_max, 50)),
-    )
+        score_min = int(restaurants["latest_score"].dropna().min())
+        score_max = int(restaurants["latest_score"].dropna().max())
+        sel_score = st.slider(
+            "Latest score range (lower = better)",
+            score_min, score_max, (score_min, min(score_max, 50)),
+        )
 
     mask = pd.Series(True, index=restaurants.index)
     if sel_boros:
@@ -208,16 +212,414 @@ def _sidebar_filters(restaurants: pd.DataFrame) -> pd.DataFrame:
 # ===========================================================================
 # APP TITLE
 # ===========================================================================
-st.title("NYC Safe Restaurant Finder")
-st.markdown(
-    "Six-part interactive dashboard: **data pipeline**, **KNN classifier**, "
-    "**Decision Tree classifier**, **cuisine-type predictor**, "
-    "**RL-powered safe route finder**, and the **Ultimate Finder** — "
-    "built on 295,995 DOHMH inspection records."
-)
+if not _demo_active:
+    st.title("NYC Safe Restaurant Finder")
+    st.markdown(
+        "Six-part interactive dashboard: **data pipeline**, **KNN classifier**, "
+        "**Decision Tree classifier**, **cuisine-type predictor**, "
+        "**RL-powered safe route finder**, and the **Ultimate Finder** — "
+        "built on 295,995 DOHMH inspection records."
+    )
 
 _restaurants = _load_restaurants()
-_filtered    = _sidebar_filters(_restaurants)
+
+# ===========================================================================
+# DEMO MODE — clean, abstracted UX (location + food → route)
+# ===========================================================================
+def _render_demo_mode(rdf: pd.DataFrame) -> None:
+    import folium
+    from streamlit_folium import st_folium
+    from src.combined_model import CombinedGradePredictor
+    from src.ultimate_finder import (
+        find_area_route,
+        rank_restaurants_direct,
+        get_direct_route_to_restaurant,
+    )
+
+    @st.cache_resource(show_spinner=False)
+    def _demo_load_model():
+        m = CombinedGradePredictor(knn_weight=0.35, k=7, dt_max_depth=12)
+        m.fit(rdf)
+        return m, m.predict_safety_scores(rdf)
+
+    @st.cache_data(show_spinner=False)
+    def _demo_load_nyc_boroughs():
+        import json, pathlib
+        return json.loads(pathlib.Path("data/nyc_boroughs.geojson").read_text())
+
+    def _point_in_ring(lat: float, lng: float, ring) -> bool:
+        n = len(ring)
+        inside = False
+        j = n - 1
+        for i in range(n):
+            xi, yi = ring[i][0], ring[i][1]
+            xj, yj = ring[j][0], ring[j][1]
+            if ((yi > lat) != (yj > lat)) and (
+                lng < (xj - xi) * (lat - yi) / (yj - yi + 1e-12) + xi
+            ):
+                inside = not inside
+            j = i
+        return inside
+
+    def _point_in_nyc(lat: float, lng: float, geojson) -> bool:
+        for feature in geojson["features"]:
+            geom = feature["geometry"]
+            polys = geom["coordinates"] if geom["type"] == "MultiPolygon" else [geom["coordinates"]]
+            for poly in polys:
+                if _point_in_ring(lat, lng, poly[0]):
+                    return True
+        return False
+
+    st.markdown(
+        """
+        <style>
+          [data-testid="stSidebar"] { display: none !important; }
+          [data-testid="collapsedControl"] { display: none !important; }
+          .block-container { padding-top: 2.5rem !important; max-width: 880px; }
+          .demo-title { text-align: center; font-size: 2.6rem; font-weight: 800;
+                        margin: 0.4rem 0 1.8rem; letter-spacing: -0.5px; }
+          .demo-section { font-size: 0.78rem; font-weight: 700; letter-spacing: 1px;
+                          text-transform: uppercase; color: #888;
+                          margin: 1.1rem 0 0.4rem; }
+          .demo-rec-card { background: #1a2744; border-radius: 12px; padding: 14px 18px;
+                           margin: 6px 0; color: #eee; border: 2px solid transparent;
+                           box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
+          .demo-rec-card-top { border-color: #FF6A00; }
+          .demo-rec-card-sel { border-color: #10B981;
+                               box-shadow: 0 4px 18px rgba(16,185,129,0.35); }
+          .demo-rec-rank { display: inline-block; width: 28px; height: 28px;
+                            border-radius: 50%; background: #4B7BEC; color: white;
+                            font-weight: 800; text-align: center; line-height: 28px;
+                            margin-right: 10px; font-size: 0.9rem; }
+          .demo-rec-rank-top { background: #FF6A00; }
+          .demo-rec-rank-sel { background: #10B981; }
+          .demo-rec-name { font-size: 1.05rem; font-weight: 700; }
+          .demo-rec-meta { color: #a8b3c7; font-size: 0.82rem; margin-top: 4px; }
+          .demo-rec-grade { display: inline-block; padding: 2px 8px; border-radius: 6px;
+                            font-weight: 700; font-size: 0.75rem; margin-left: 6px; }
+          .demo-grade-A { background: #00C864; color: white; }
+          .demo-grade-B { background: #FFC800; color: #333; }
+          .demo-grade-C { background: #F0503C; color: white; }
+          .demo-grade-other { background: #888; color: white; }
+          .demo-pill { display: inline-block; padding: 1px 7px; border-radius: 6px;
+                       font-size: 0.65rem; font-weight: 800; letter-spacing: 0.5px;
+                       margin-left: 8px; vertical-align: middle; }
+          .demo-pill-top { background: #FF6A00; color: white; }
+          .demo-pill-sel { background: #10B981; color: white; }
+          .demo-stat-row { display: flex; gap: 18px; margin: 6px 0 14px;
+                           color: #444; font-size: 0.95rem; }
+          .demo-stat-row b { color: #111; }
+          div[data-testid="stButton"] button[kind="primary"] {
+              font-size: 1.1rem; font-weight: 700; padding: 0.7rem 1.2rem;
+              border-radius: 12px;
+          }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    _exit_col, _ = st.columns([2, 10])
+    with _exit_col:
+        if st.button("← Exit demo", key="demo_exit_btn"):
+            st.session_state["demo_mode"] = False
+            st.rerun()
+
+    st.markdown('<div class="demo-title">What are you craving?</div>', unsafe_allow_html=True)
+
+    with st.spinner("Loading…"):
+        _model, _scores = _demo_load_model()
+
+    # ── Location ──────────────────────────────────────────────────────────────
+    st.markdown('<div class="demo-section">Drop a pin anywhere in NYC</div>',
+                unsafe_allow_html=True)
+
+    _DEMO_DEFAULT_LAT, _DEMO_DEFAULT_LNG = 40.7580, -73.9855  # Times Square
+    lat = st.session_state.get("demo_lat", _DEMO_DEFAULT_LAT)
+    lng = st.session_state.get("demo_lng", _DEMO_DEFAULT_LNG)
+
+    _boroughs_geojson = _demo_load_nyc_boroughs()
+    _imap = folium.Map(
+        location=[lat, lng],
+        zoom_start=11,
+        tiles="OpenStreetMap",
+        min_lat=LAT_MIN, max_lat=LAT_MAX,
+        min_lon=LNG_MIN, max_lon=LNG_MAX,
+        max_bounds=True,
+    )
+    _imap.fit_bounds([[LAT_MIN, LNG_MIN], [LAT_MAX, LNG_MAX]])
+    folium.GeoJson(
+        _boroughs_geojson,
+        name="NYC boroughs",
+        style_function=lambda _: {
+            "color": "#4C8BF5", "weight": 2, "fillColor": "#4C8BF5", "fillOpacity": 0.05,
+        },
+        highlight_function=lambda _: {"weight": 3, "fillOpacity": 0.12},
+    ).add_to(_imap)
+    folium.Marker(
+        [lat, lng],
+        tooltip="Your location (click map to move)",
+        icon=folium.Icon(color="blue", icon="home", prefix="fa"),
+    ).add_to(_imap)
+    _md = st_folium(
+        _imap, width="100%", height=320, key="demo_input_map",
+        returned_objects=["last_clicked"],
+    )
+    if _md and _md.get("last_clicked"):
+        _cl = _md["last_clicked"]
+        _nl, _nw = round(float(_cl["lat"]), 6), round(float(_cl["lng"]), 6)
+        if _point_in_nyc(_nl, _nw, _boroughs_geojson):
+            st.session_state["demo_lat"] = _nl
+            st.session_state["demo_lng"] = _nw
+            lat, lng = _nl, _nw
+
+    # ── What to eat ───────────────────────────────────────────────────────────
+    st.markdown('<div class="demo-section">What do you want to eat?</div>',
+                unsafe_allow_html=True)
+    query = st.text_input(
+        "Query",
+        key="demo_query",
+        placeholder="e.g. spicy ramen, wood-fired pizza, dim sum…",
+        label_visibility="collapsed",
+    )
+
+    use_area = False
+
+    # ── Walking budget ────────────────────────────────────────────────────────
+    st.markdown('<div class="demo-section">How far are you willing to walk?</div>',
+                unsafe_allow_html=True)
+    walk_keys = list(WALK_PRESETS.keys())
+    walk_preset = st.select_slider(
+        "Walking budget",
+        options=walk_keys,
+        value="15 min (~1.1 km)",
+        key="demo_walk_preset",
+        label_visibility="collapsed",
+    )
+
+    st.markdown("&nbsp;", unsafe_allow_html=True)
+
+    if st.button("Find", type="primary", key="demo_find_btn", use_container_width=True):
+        if not query.strip():
+            st.warning("Tell us what you'd like to eat.")
+        else:
+            with st.spinner("Finding the best spots…"):
+                if use_area:
+                    _ar = find_area_route(
+                        df=rdf, safety_scores=_scores,
+                        user_lat=lat, user_lng=lng, query=query,
+                        walk_preset_key=walk_preset,
+                        cuisine_importance=0.7,
+                        danger_filter=True,
+                        smooth_sigma=1.0, use_osrm=True,
+                    )
+                    _recs = _ar.destination_restaurants.dropna(
+                        subset=["latitude", "longitude"]
+                    )
+                    if "safety" in _recs.columns:
+                        _recs = _recs.sort_values("safety", ascending=False)
+                    _recs = _recs.head(8).reset_index(drop=True)
+                else:
+                    _ranked, _, _ = rank_restaurants_direct(
+                        df=rdf, safety_scores=_scores,
+                        user_lat=lat, user_lng=lng, query=query,
+                        walk_preset_key=walk_preset,
+                        danger_filter=True, top_n=15,
+                    )
+                    _recs = _ranked.dropna(
+                        subset=["latitude", "longitude"]
+                    ).head(8).reset_index(drop=True)
+
+                _routes: list[dict] = []
+                for _, _r in _recs.iterrows():
+                    _sr, _gr, _dist, _walk = get_direct_route_to_restaurant(
+                        lat, lng, float(_r["latitude"]), float(_r["longitude"]),
+                        use_osrm=True,
+                    )
+                    _routes.append({
+                        "street": _sr, "grid": _gr,
+                        "dist_km": _dist, "walk_min": _walk,
+                    })
+
+            st.session_state["demo_recs"] = _recs
+            st.session_state["demo_routes"] = _routes
+            st.session_state["demo_selected"] = 0
+            st.session_state["demo_user_lat"] = lat
+            st.session_state["demo_user_lng"] = lng
+
+    _recs = st.session_state.get("demo_recs")
+    if _recs is None:
+        return
+    if _recs.empty:
+        st.info("No matching restaurants found within that walking budget. "
+                "Try a longer walk or a different query.")
+        return
+
+    _routes = st.session_state.get("demo_routes", [])
+    _sel = int(st.session_state.get("demo_selected", 0))
+    _sel = max(0, min(_sel, len(_recs) - 1))
+    _ulat = st.session_state.get("demo_user_lat", lat)
+    _ulng = st.session_state.get("demo_user_lng", lng)
+
+    _sel_row = _recs.iloc[_sel]
+    _sel_route = _routes[_sel] if _sel < len(_routes) else None
+    _route_pts = (_sel_route["street"] if _sel_route and _sel_route["street"]
+                  else (_sel_route["grid"] if _sel_route else []))
+
+    _ctr_lat = (_ulat + float(_sel_row["latitude"])) / 2
+    _ctr_lng = (_ulng + float(_sel_row["longitude"])) / 2
+    _rmap = folium.Map(
+        location=[_ctr_lat, _ctr_lng], zoom_start=15, tiles="OpenStreetMap",
+    )
+    if _route_pts and len(_route_pts) >= 2:
+        folium.PolyLine(_route_pts, color="#FF8C00", weight=5,
+                        opacity=0.95).add_to(_rmap)
+    folium.Marker(
+        [_ulat, _ulng], tooltip="Your location",
+    ).add_to(_rmap)
+    for _i, (_, _row) in enumerate(_recs.iterrows()):
+        _rank = _i + 1
+        _is_top = (_i == 0)
+        _is_sel = (_i == _sel)
+        if _is_sel:
+            _bg, _bd, _sz = "#10B981", "#FFE600", 40
+        elif _is_top:
+            _bg, _bd, _sz = "#FF6A00", "white", 36
+        else:
+            _bg, _bd, _sz = "#4B7BEC", "white", 32
+        _html = (
+            f'<div style="background:{_bg};color:white;border-radius:50%;'
+            f'width:{_sz}px;height:{_sz}px;display:flex;align-items:center;'
+            f'justify-content:center;font-weight:800;border:3px solid {_bd};'
+            f'box-shadow:0 3px 10px rgba(0,0,0,0.45);font-size:13px;'
+            f'box-sizing:border-box;">{_rank}</div>'
+        )
+        folium.Marker(
+            location=[float(_row["latitude"]), float(_row["longitude"])],
+            tooltip=(f"#{_rank} — {_row.get('dba','?')} "
+                     f"({_row.get('cuisine','—')})"),
+            icon=folium.DivIcon(
+                icon_size=(_sz, _sz),
+                icon_anchor=(_sz // 2, _sz // 2),
+                html=_html,
+            ),
+        ).add_to(_rmap)
+
+    _stat_dist = (_sel_route["dist_km"] if _sel_route else 0)
+    _stat_walk = (_sel_route["walk_min"] if _sel_route else 0)
+    _src = ("real streets" if (_sel_route and _sel_route["street"])
+            else "approx.")
+    st.markdown('<div class="demo-section">Your route</div>',
+                unsafe_allow_html=True)
+    st.markdown(
+        f'<div class="demo-stat-row">'
+        f'<span><b>{_sel_row.get("dba","?")}</b> — picked</span>'
+        f'<span>{_stat_dist:.2f} km</span>'
+        f'<span>~{_stat_walk:.0f} min walk</span>'
+        f'<span style="color:#888">via {_src}</span>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+    st_folium(_rmap, width="100%", height=480, key="demo_result_map",
+              returned_objects=[])
+
+    _render_recommendations(_recs, _sel)
+
+
+def _render_recommendations(df: pd.DataFrame, selected_idx: int = 0) -> None:
+    if df is None or df.empty:
+        return
+    st.markdown(
+        '<div class="demo-section">Top picks — tap one to route there</div>',
+        unsafe_allow_html=True,
+    )
+    for i, (_, row) in enumerate(df.iterrows()):
+        rank = i + 1
+        is_top = (i == 0)
+        is_sel = (i == selected_idx)
+        name = str(row.get("dba", "Unknown") or "Unknown")
+        cuisine = str(row.get("cuisine", "—") or "—")
+        addr_parts = [str(row.get("building", "") or ""),
+                      str(row.get("street", "") or ""),
+                      str(row.get("boro", "") or "")]
+        addr = ", ".join(p for p in addr_parts if p and p != "0")
+        grade = str(row.get("latest_grade", "") or "").strip()
+        gcls = f"demo-grade-{grade}" if grade in ("A", "B", "C") else "demo-grade-other"
+        gtxt = grade if grade in ("A", "B", "C") else "—"
+        safety = row.get("safety", None)
+        safety_txt = (f"  ·  predicted safety {float(safety):.2f}/3"
+                      if safety is not None and pd.notna(safety) else "")
+        card_cls = "demo-rec-card"
+        rank_cls = "demo-rec-rank"
+        if is_sel:
+            card_cls += " demo-rec-card-sel"
+            rank_cls += " demo-rec-rank-sel"
+        elif is_top:
+            card_cls += " demo-rec-card-top"
+            rank_cls += " demo-rec-rank-top"
+        pills = ""
+        if is_top:
+            pills += '<span class="demo-pill demo-pill-top">TOP PICK</span>'
+        if is_sel:
+            pills += '<span class="demo-pill demo-pill-sel">SELECTED</span>'
+
+        col_card, col_btn = st.columns([10, 2])
+        with col_card:
+            st.markdown(
+                f"""
+                <div class="{card_cls}">
+                  <span class="{rank_cls}">{rank}</span>
+                  <span class="demo-rec-name">{name}</span>
+                  <span class="demo-rec-grade {gcls}">{gtxt}</span>
+                  {pills}
+                  <div class="demo-rec-meta">{cuisine}{safety_txt}<br>{addr}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+        with col_btn:
+            btn_label = "✓" if is_sel else "Go →"
+            if st.button(btn_label, key=f"demo_pick_{i}",
+                         use_container_width=True, disabled=is_sel):
+                st.session_state["demo_selected"] = i
+                st.rerun()
+
+
+if _demo_active:
+    _render_demo_mode(_restaurants)
+    st.stop()
+
+# ===========================================================================
+# SIDEBAR — Demo entry button
+# ===========================================================================
+st.markdown(
+    """
+    <style>
+      [data-testid="stSidebar"] div[data-testid="stButton"]:first-of-type > button {
+          background: #FF4B4B;
+          color: white;
+          font-weight: 700;
+          letter-spacing: 0.5px;
+          border: none;
+          border-radius: 8px;
+          padding: 0.6rem 1.4rem;
+          margin: 12px auto 22px;
+          display: block;
+          width: auto;
+          box-shadow: 0 3px 10px rgba(255,75,75,0.35);
+          transition: transform 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
+      }
+      [data-testid="stSidebar"] div[data-testid="stButton"]:first-of-type > button:hover {
+          background: #E63E3E;
+          transform: translateY(-1px);
+          box-shadow: 0 5px 14px rgba(255,75,75,0.5);
+      }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+if st.sidebar.button("DEMO", key="enter_demo_btn"):
+    st.session_state["demo_mode"] = True
+    st.rerun()
 
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "Part 1: Data & Exploration",
@@ -233,6 +635,8 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
 # PART 1 — DATA PIPELINE + DATA EXPLORER + NYC MAP
 # ===========================================================================
 with tab1:
+
+    _filtered = _sidebar_filters(_restaurants)
 
     # ── 1.1  Conversion pipeline ────────────────────────────────────────────
     st.header("1.1  Three-Step Conversion Pipeline")

@@ -526,8 +526,13 @@ def get_osrm_route(
     The OSRM demo server is free to use but not guaranteed.  The caller
     should fall back to streetify_path() when this returns None.
     """
+    base = (
+        "https://routing.openstreetmap.de/routed-foot"
+        if mode == "foot"
+        else "http://router.project-osrm.org"
+    )
     url = (
-        f"http://router.project-osrm.org/route/v1/{mode}/"
+        f"{base}/route/v1/{mode}/"
         f"{start_lng:.6f},{start_lat:.6f};"
         f"{dest_lng:.6f},{dest_lat:.6f}"
     )
